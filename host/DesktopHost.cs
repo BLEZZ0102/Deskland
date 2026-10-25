@@ -27,9 +27,9 @@ using Microsoft.Win32;
 
 static class Program
 {
-    public const string ExitEventName = "DesklandHost_Exit";
-    public const string MenuEventName = "DesklandHost_Menu";
-    public const string SettingsEventName = "DesklandHost_Settings";
+    public static readonly string ExitEventName = "DesklandHost_Exit" + InstallProfile.Suffix;
+    public static readonly string MenuEventName = "DesklandHost_Menu" + InstallProfile.Suffix;
+    public static readonly string SettingsEventName = "DesklandHost_Settings" + InstallProfile.Suffix;
 
     // 通知正在运行的实例（退出 / 弹出菜单）
     static void Signal(string name)
@@ -48,11 +48,12 @@ static class Program
         if (args.Length > 0 && args[0] == "--exit") { Signal(ExitEventName); return; }
         if (args.Length > 0 && args[0] == "--menu") { Signal(MenuEventName); return; }
         if (args.Length > 0 && args[0] == "--settings") { Signal(SettingsEventName); return; }
-        Rename.Migrate();                                 // 老名字（Habitat Wallpaper）下的数据目录、开机自启项搬过来
+        if (args.Length > 0 && args[0] == "--exit-installed") { Environment.ExitCode = InstallProfile.StopInstalled(); return; }
+        if (!InstallProfile.Isolated) Rename.Migrate();                                 // 老名字（Habitat Wallpaper）下的数据目录、开机自启项搬过来
         bool fromAutostart = Array.IndexOf(args, "--autostart") >= 0;
         if (fromAutostart) AutoStartCheck.MarkLaunched();  // 开机自启跑起来了（不管后面是不是已经在运行）
         bool created;
-        var mutex = new Mutex(true, "DesklandHost_Singleton", out created);
+        var mutex = new Mutex(true, "DesklandHost_Singleton" + InstallProfile.Suffix, out created);
         if (!created)
         {
             if (!fromAutostart) Signal(SettingsEventName); // 已经在运行：再次双击程序 = 打开设置（开机自启那次就悄悄退出）
@@ -87,8 +88,7 @@ static class Program
 
 static class Log
 {
-    public static readonly string DataDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deskland");
+    public static readonly string DataDir = InstallProfile.DataDir;
     public static readonly string FilePath = Path.Combine(DataDir, "host.log");
 
     public static void Write(string msg)
@@ -623,6 +623,7 @@ class HostContext : ApplicationContext
     // 开机自动启动：写在当前用户的 Run 项里，只有用户在菜单里打勾才会写
     static string AutoStartValue()
     {
+        if (InstallProfile.Isolated) return "";
         using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKey))
         {
             string v = k == null ? null : k.GetValue(RunName) as string;
@@ -637,6 +638,7 @@ class HostContext : ApplicationContext
 
     void SetAutoStart(bool on)
     {
+        if (InstallProfile.Isolated) return;
         try
         {
             using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))
@@ -1410,4 +1412,43 @@ static class Native
     [DllImport("kernel32.dll")] public static extern bool VirtualFreeEx(IntPtr proc, IntPtr addr, IntPtr size, uint type);
     [DllImport("kernel32.dll")] public static extern bool WriteProcessMemory(IntPtr proc, IntPtr addr, ref RECT buf, int size, out IntPtr written);
     [DllImport("kernel32.dll")] public static extern bool ReadProcessMemory(IntPtr proc, IntPtr addr, out RECT buf, int size, out IntPtr read);
+}
+
+// Optional isolated profile for installation QA; normal launches keep the existing data directory.
+static class InstallProfile
+{
+    public static readonly string Override = Environment.GetEnvironmentVariable("DESKLAND_PROFILE_DIR");
+    public static readonly bool Isolated = !string.IsNullOrEmpty(Override);
+    public static readonly string DataDir = Isolated ? Path.GetFullPath(Override) : Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deskland");
+    public static readonly string Suffix = MakeSuffix();
+    static string MakeSuffix()
+    {
+        if (!Isolated) return "";
+        using (var hash = System.Security.Cryptography.SHA256.Create())
+            return "_" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(DataDir.ToUpperInvariant()))).Replace("-", "").Substring(0, 24);
+    }
+
+    // An installer may only close the instance using this exact executable path.
+    public static int StopInstalled()
+    {
+        foreach (Process process in Process.GetProcessesByName("Deskland"))
+        {
+            using (process)
+            {
+                if (process.Id == Process.GetCurrentProcess().Id) continue;
+                try
+                {
+                    if (!string.Equals(process.MainModule.FileName, Application.ExecutablePath, StringComparison.OrdinalIgnoreCase)) continue;
+                    EventWaitHandle ev;
+                    if (!EventWaitHandle.TryOpenExisting(Program.ExitEventName, out ev)) return 1;
+                    using (ev) ev.Set();
+                    if (!process.WaitForExit(10000)) return 1;
+                }
+                catch (InvalidOperationException) { }
+                catch { return 1; }
+            }
+        }
+        return 0;
+    }
 }

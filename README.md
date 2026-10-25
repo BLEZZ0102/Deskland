@@ -41,6 +41,14 @@ host\bin\Deskland.exe --exit
 
 程序设置与日志位于 `%LOCALAPPDATA%\Deskland`。沙滩和草地的设置可持续保留；同一时间只运行一个 Deskland 实例。
 
+## Windows 安装包
+
+体验版安装包名为 `Deskland-Preview-0.1.0-win-x64-Setup.exe`，安装到当前用户目录，无需管理员权限。开始菜单中可启动和卸载 Deskland，卸载保留用户设置。安装包自带对应源码 `Deskland-source.zip`。
+
+已安装 WebView2 Runtime 时可离线安装；缺少时会调用微软引导程序联网安装。当前安装包未签名。
+
+制作安装包：`powershell -ExecutionPolicy Bypass -File tools\build-installer.ps1`。首次下载便携版 NSIS 与微软 WebView2 引导程序，不安装全局开发工具；产物位于 `dist/`，附 SHA256 校验文件。
+
 ## 浏览器预览
 
 安装 Node.js 后，在仓库根目录执行：
@@ -67,7 +75,7 @@ node prototype\serve.mjs
 
 - 目前只支持主显示器。
 - Windows 使用壁纸幻灯片或 Windows 聚焦时，系统换图可能造成短暂闪烁。
-- 体验版源码仓库暂不提供正式安装包；可按上面的步骤本地构建。
+- 安装包暂为本地测试版本，尚未对外发布。
 
 ## 许可与反馈
 

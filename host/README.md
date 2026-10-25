@@ -20,6 +20,7 @@ host\bin\Deskland.exe
 | `--settings` | 打开设置 |
 | `--menu` | 打开托盘菜单 |
 | `--exit` | 正常退出，恢复系统壁纸 |
+| `--exit-installed` | 安装器使用：仅退出使用当前可执行文件路径的实例 |
 
 ## 行为与数据
 
@@ -31,6 +32,8 @@ host\bin\Deskland.exe
 - 设置保存到 `%LOCALAPPDATA%\Deskland\settings.json`，日志为同目录下的 `host.log`。
 - 分享只使用图标位置，主题页面会画示例图标和名字色块，不截取桌面窗口。
 - 主题页面改动后，使用托盘“重新载入”；宿主 C# 改动后需要退出并重新构建。
+
+安装测试可设置绝对路径环境变量 `DESKLAND_PROFILE_DIR`，隔离设置、WebView2 缓存和单实例事件；此模式跳过旧数据迁移，并禁用开机启动写入。正常启动不设置此变量，继续使用原数据目录。
 
 ## 页面通信
 
