@@ -1,0 +1,39 @@
+# Deskland Windows 宿主
+
+以 C# / .NET Framework 和 WebView2 把主题页面挂到 Windows 桌面图标层下方。
+
+## 构建与运行
+
+```powershell
+powershell -ExecutionPolicy Bypass -File host\build.ps1
+host\bin\Deskland.exe
+```
+
+构建脚本使用 Windows 自带的 C# 编译器，首次从 NuGet 下载固定版本的 WebView2 开发库。依赖保存在 `host/lib/`，输出位于 `host/bin/`；二者均不提交到仓库。
+
+## 常用参数
+
+| 参数 | 行为 |
+| --- | --- |
+| 无参数 | 启动壁纸并打开设置；已运行时打开设置 |
+| `--autostart` | 后台启动，不弹设置 |
+| `--settings` | 打开设置 |
+| `--menu` | 打开托盘菜单 |
+| `--exit` | 正常退出，恢复系统壁纸 |
+
+## 行为与数据
+
+- 主题来自 `prototype/themes.json`，仅加载状态为 `ready` 的主题。
+- 每 400ms 检查桌面图标位置，有变化才通知主题页面。
+- 前台窗口最大化或全屏时暂停；托盘可手动暂停与继续。
+- Windows 11 24H2 及以后使用 Progman 分层子窗口；较早系统使用 WorkerW。
+- 当前仅覆盖主显示器；系统壁纸幻灯片或 Windows 聚焦换图时可能短暂闪烁。
+- 设置保存到 `%LOCALAPPDATA%\Deskland\settings.json`，日志为同目录下的 `host.log`。
+- 分享只使用图标位置，主题页面会画示例图标和名字色块，不截取桌面窗口。
+- 主题页面改动后，使用托盘“重新载入”；宿主 C# 改动后需要退出并重新构建。
+
+## 页面通信
+
+设置页发送 `hello`、`set`、`reset`、`theme`、`lang`、`autostart`、分享相关消息；宿主发送初始化设置、图标矩形和分享结果。
+
+主题页发送 `ready` 后，宿主依次传递设置和图标位置；随后传递参数变化、图标变化和暂停状态。设置与主题页面统一从本地虚拟域名加载。
