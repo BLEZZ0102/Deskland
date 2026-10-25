@@ -45,7 +45,7 @@ if ($appVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid application versio
 $versionSource = Join-Path $bin 'Deskland-version.cs'
 $versionText = @"
 using System.Reflection;
-[assembly: AssemblyTitle("Deskland")]
+[assembly: AssemblyTitle("Deskland Preview")]
 [assembly: AssemblyProduct("Deskland Preview")]
 [assembly: AssemblyVersion("$appVersion.0")]
 [assembly: AssemblyFileVersion("$appVersion.0")]
@@ -53,10 +53,12 @@ using System.Reflection;
 "@
 [IO.File]::WriteAllText($versionSource, $versionText, (New-Object Text.UTF8Encoding($false)))
 & $csc /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 /win32manifest:"$root\app.manifest" `
+    /win32icon:"$root\DesklandPreview.ico" `
     /out:"$bin\Deskland.exe" `
     /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll `
     /r:"$lib\Microsoft.Web.WebView2.Core.dll" /r:"$lib\Microsoft.Web.WebView2.WinForms.dll" `
     "$root\DesktopHost.cs" "$versionSource"
 if ($LASTEXITCODE -ne 0) { throw '编译失败' }
 foreach ($assembly in $assemblies) { Copy-Item -LiteralPath (Join-Path $lib $assembly.Name) -Destination $bin -Force }
+Copy-Item -LiteralPath (Join-Path $root 'DesklandPreview.ico') -Destination (Join-Path $bin 'DesklandPreview.ico') -Force
 Write-Host "编译完成：$bin\Deskland.exe"

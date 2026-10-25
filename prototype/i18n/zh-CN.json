@@ -54,7 +54,14 @@
     "resetOne": "恢复默认：{v}",
     "resetOneAria": "{label}恢复默认",
     "dblclickReset": "双击恢复默认（{v}）",
-    "comingSoon": "即将加入："
+    "comingSoon": "即将加入：",
+    "badgeLocked": "壁纸版",
+    "lockedTitle": "{name} · 壁纸版主题，点击查看购买方式",
+    "purchaseTitle": "购买壁纸版",
+    "purchaseTheme": "“{name}”是壁纸版主题。",
+    "purchaseMessage": "体验版可永久使用沙滩和草地。壁纸版可解锁更多主题，并在同一个 Deskland 中使用。",
+    "purchaseLater": "继续体验",
+    "purchaseWebsite": "前往官网"
   },
   "host": {
     "traySettings": "设置…",

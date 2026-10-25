@@ -49,7 +49,7 @@ static class Program
         if (args.Length > 0 && args[0] == "--menu") { Signal(MenuEventName); return; }
         if (args.Length > 0 && args[0] == "--settings") { Signal(SettingsEventName); return; }
         if (args.Length > 0 && args[0] == "--exit-installed") { Environment.ExitCode = InstallProfile.StopInstalled(); return; }
-        if (!InstallProfile.Isolated) Rename.Migrate();                                 // 老名字（Habitat Wallpaper）下的数据目录、开机自启项搬过来
+        // Preview never migrates or shares the development edition's settings.                                 // 老名字（Habitat Wallpaper）下的数据目录、开机自启项搬过来
         bool fromAutostart = Array.IndexOf(args, "--autostart") >= 0;
         if (fromAutostart) AutoStartCheck.MarkLaunched();  // 开机自启跑起来了（不管后面是不是已经在运行）
         bool created;
@@ -332,7 +332,7 @@ static class Themes
 // 打开设置的方式：双击程序（没运行就先启动再打开）、双击托盘图标、菜单 → 设置…（或 --settings）
 class HostContext : ApplicationContext
 {
-    public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "Deskland";
+    public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "DesklandPreview";
     static readonly MethodInfo ShowTrayMenu =
         typeof(NotifyIcon).GetMethod("ShowContextMenu", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -381,7 +381,7 @@ class HostContext : ApplicationContext
 
         tray = new NotifyIcon();
         tray.Icon = AppIcon.Create();
-        tray.Text = "Deskland";
+        tray.Text = "Deskland Preview";
         tray.ContextMenu = new ContextMenu(new[] {
             settingsItem,
             pauseItem,
@@ -510,6 +510,9 @@ class HostContext : ApplicationContext
             case "openShare":
                 if (lastShare != null && File.Exists(lastShare)) Process.Start(lastShare);
                 break;
+            case "openWebsite":
+                Process.Start("https://deskland.app/");
+                break;
             case "revealShare":
                 if (lastShare != null && File.Exists(lastShare)) Process.Start("explorer.exe", "/select,\"" + lastShare + "\"");
                 break;
@@ -529,7 +532,7 @@ class HostContext : ApplicationContext
         {
             int comma = png.IndexOf(',');
             byte[] bytes = Convert.FromBase64String(comma >= 0 ? png.Substring(comma + 1) : png);
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland");
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland Preview");
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, "Deskland " + DateTime.Now.ToString("yyyy-MM-dd HHmmss") + ".png");
             File.WriteAllBytes(path, bytes);
@@ -569,7 +572,7 @@ class HostContext : ApplicationContext
         {
             int comma = video.IndexOf(',');
             byte[] bytes = Convert.FromBase64String(comma >= 0 ? video.Substring(comma + 1) : video);
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland");
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland Preview");
             Directory.CreateDirectory(dir);
             string name = "Deskland " + DateTime.Now.ToString("yyyy-MM-dd HHmmss") + (mime == "video/webm" ? ".webm" : ".mp4");
             string path = Path.Combine(dir, name);
@@ -680,7 +683,7 @@ class HostContext : ApplicationContext
         if (restarts.Count > 5)
         {
             Log.Write("壁纸窗口 1 分钟内被销毁超过 5 次，停止重试");
-            MessageBox.Show(I18n.T("errRebuilt") + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland");
+            MessageBox.Show(I18n.T("errRebuilt") + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland Preview");
             Exit();
             return;
         }
@@ -751,22 +754,7 @@ static class AppIcon
 {
     public static Icon Create()
     {
-        var bmp = new Bitmap(32, 32);
-        using (Graphics g = Graphics.FromImage(bmp))
-        using (GraphicsPath tile = RoundRect(new Rectangle(1, 1, 30, 30), 8))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            using (var sea = new LinearGradientBrush(new Rectangle(0, 0, 32, 32), Color.FromArgb(0, 132, 178), Color.FromArgb(96, 214, 204), 135f))
-                g.FillPath(sea, tile);
-            g.SetClip(tile);
-            using (var shoal = new SolidBrush(Color.FromArgb(150, 220, 236, 214))) g.FillEllipse(shoal, -16, 9, 42, 36);
-            using (var sand = new SolidBrush(Color.FromArgb(250, 238, 220))) g.FillEllipse(sand, -12, 15, 34, 28);
-            using (var foam = new Pen(Color.White, 2.2f)) g.DrawArc(foam, -15, 11, 40, 35, 245, 120);
-            using (var kayak = new SolidBrush(Color.FromArgb(255, 210, 40))) g.FillEllipse(kayak, 20, 7, 7, 3);
-            g.ResetClip();
-        }
-        return Icon.FromHandle(bmp.GetHicon());
+        return new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DesklandPreview.ico"));
     }
 
     static GraphicsPath RoundRect(Rectangle r, int radius)
@@ -793,9 +781,9 @@ class SettingsForm : Form
     {
         this.pageDir = pageDir;
         this.host = host;
-        Text = "";
-        AccessibleName = "Deskland";
-        ShowIcon = false;
+        Text = "Deskland Preview";
+        AccessibleName = "Deskland Preview";
+        ShowIcon = true;
         Icon = AppIcon.Create();
         StartPosition = FormStartPosition.CenterScreen;
         float s = Native.GetDpiForSystem() / 96f;       // 进程按物理像素工作，窗口尺寸要自己按缩放比例算
@@ -856,7 +844,7 @@ class SettingsForm : Form
         catch (Exception ex)
         {
             Log.Write("设置窗口启动失败：" + ex);
-            MessageBox.Show(I18n.T("errSettings", "msg", ex.Message), "Deskland");
+            MessageBox.Show(I18n.T("errSettings", "msg", ex.Message), "Deskland Preview");
             Close();
         }
     }
@@ -1072,7 +1060,7 @@ class WallpaperForm : Form
     void Fail(string msg)
     {
         Log.Write(msg);
-        MessageBox.Show(msg + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland");
+        MessageBox.Show(msg + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland Preview");
         Fatal = true;
         Shutdown();
     }
@@ -1414,19 +1402,19 @@ static class Native
     [DllImport("kernel32.dll")] public static extern bool ReadProcessMemory(IntPtr proc, IntPtr addr, out RECT buf, int size, out IntPtr read);
 }
 
-// Optional isolated profile for installation QA; normal launches keep the existing data directory.
+// Deskland Preview has its own data and instance identity; isolated profiles support installation QA.
 static class InstallProfile
 {
     public static readonly string Override = Environment.GetEnvironmentVariable("DESKLAND_PROFILE_DIR");
     public static readonly bool Isolated = !string.IsNullOrEmpty(Override);
     public static readonly string DataDir = Isolated ? Path.GetFullPath(Override) : Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deskland");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesklandPreview");
     public static readonly string Suffix = MakeSuffix();
     static string MakeSuffix()
     {
-        if (!Isolated) return "";
+        if (!Isolated) return "_Preview";
         using (var hash = System.Security.Cryptography.SHA256.Create())
-            return "_" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(DataDir.ToUpperInvariant()))).Replace("-", "").Substring(0, 24);
+            return "_Preview_" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(DataDir.ToUpperInvariant()))).Replace("-", "").Substring(0, 24);
     }
 
     // An installer may only close the instance using this exact executable path.

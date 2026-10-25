@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deskland</title>
+<title>Deskland Preview</title>
 <!--
   Deskland 设置窗口
   - 由桌面宿主（host/Deskland.exe）在 WebView2 里打开；单独用浏览器打开时使用模拟数据，方便调界面
@@ -102,6 +102,14 @@
   .theme-arrow { flex: none; width: 17px; height: 17px; color: var(--muted); }
   .theme .thumb { flex: none; height: 112px; border-radius: 20px; position: relative; overflow: hidden; }
   .theme:disabled .thumb { filter: saturate(.55) brightness(1.02); opacity: .75; }
+  .theme.locked .thumb { filter: none; opacity: 1; }
+  .theme .lock-mark { position: absolute; right: 12px; bottom: 12px; display: grid; place-items: center; width: 30px; height: 30px;
+    border-radius: 50%; background: rgba(255, 255, 255, .94); color: #252a28; box-shadow: 0 2px 10px rgba(0, 0, 0, .14); }
+  .theme .lock-mark svg { width: 15px; height: 15px; }
+  .purchase-box { max-width: 440px; }
+  .purchase-icon { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 16px; border-radius: 14px;
+    background: var(--panel-2); color: var(--text); }
+  .purchase-icon svg { width: 21px; height: 21px; }
   .theme .badge {
     display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 20px; font-size: 10px; line-height: 1.5;
     background: var(--panel-2); color: var(--muted);
@@ -222,7 +230,7 @@
 <body>
 <header class="top">
   <div class="top-left">
-    <div class="brand">Deskland</div>
+    <div class="brand">Deskland Preview</div>
     <div class="section-title" data-i18n="themes">主题</div>
   </div>
   <div class="top-right">
@@ -266,6 +274,19 @@
     <section class="card controls" id="controls"></section>
   </div>
 </main>
+
+<div class="modal" id="purchaseModal" hidden role="dialog" aria-modal="true" aria-labelledby="purchaseTitle">
+  <div class="box purchase-box">
+    <div class="purchase-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+    <h3 id="purchaseTitle" data-i18n="purchaseTitle">购买壁纸版</h3>
+    <p class="sub" id="purchaseTheme"></p>
+    <p class="sub" data-i18n="purchaseMessage">体验版可永久使用沙滩和草地。壁纸版可解锁更多主题，并在同一个 Deskland 中使用。</p>
+    <div class="actions">
+      <button class="ghost-btn" id="purchaseLater" data-i18n="purchaseLater">继续体验</button>
+      <button class="ghost-btn primary" id="purchaseWebsite" data-i18n="purchaseWebsite">前往官网</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal" id="shareModal" hidden role="dialog" aria-modal="true" aria-labelledby="shareTitle">
   <div class="box">
@@ -362,7 +383,7 @@ async function setLang(code) {
 // 换了语言：界面上的字都重新填一遍（预览不用重新加载）
 function rerenderTexts() {
   if (!state.screen) return;
-  renderHead(); renderThemes(); renderControls(); updateFoot(); shareBusy(shareState); showAutostartWarn();
+  renderHead(); renderThemes(); renderControls(); updateFoot(); shareBusy(shareState); showAutostartWarn(); updatePurchaseText();
 }
 $('lang').addEventListener('change', e => {
   state.langSetting = e.target.value;
@@ -388,17 +409,37 @@ function fmt(p, v) {
 
 function renderThemes() {
   $('themes').innerHTML = state.registry.themes.map(th => {
-    const ready = th.status === 'ready', on = th.id === state.theme;
-    return `<button class="theme${on ? ' on' : ''}" data-id="${th.id}" aria-pressed="${on}" ${ready ? '' : 'disabled'} title="${th.desc || ''}">
-      <div class="theme-copy"><div class="theme-meta"><span class="badge">${t(on ? 'badgeOn' : ready ? 'badgeReady' : 'badgeSoon')}</span>
+    const locked = th.locked === true, ready = th.status === 'ready', on = th.id === state.theme;
+    const title = locked ? t('lockedTitle', { name: th.name }) : th.desc || '';
+    return `<button class="theme${on ? ' on' : ''}${locked ? ' locked' : ''}" data-id="${th.id}" data-locked="${locked}" aria-pressed="${on}" aria-label="${title}" title="${title}" ${ready || locked ? '' : 'disabled'}>
+      <div class="theme-copy"><div class="theme-meta"><span class="badge">${t(on ? 'badgeOn' : locked ? 'badgeLocked' : ready ? 'badgeReady' : 'badgeSoon')}</span>
         <svg class="theme-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 15 15 5M5 5h10v10"/></svg></div>
         <div class="name">${th.name}</div><div class="desc">${th.desc || ''}</div></div>
-      <div class="thumb" style="background:${th.thumb || '#ccc'}"></div></button>`;
+      <div class="thumb" style="background:${th.thumb || '#ccc'}">${locked ? `<span class="lock-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>` : ''}</div></button>`;
   }).join('');
+}
+let purchaseThemeId = null, purchaseReturnFocus = null;
+function updatePurchaseText() {
+  const th = themeById(purchaseThemeId);
+  if (th) $('purchaseTheme').textContent = t('purchaseTheme', { name: th.name });
+}
+function showPurchase(id) {
+  purchaseThemeId = id;
+  purchaseReturnFocus = document.activeElement;
+  updatePurchaseText();
+  $('purchaseModal').hidden = false;
+  $('purchaseWebsite').focus();
+}
+function closePurchase() {
+  if ($('purchaseModal').hidden) return;
+  $('purchaseModal').hidden = true;
+  if (purchaseReturnFocus) purchaseReturnFocus.focus();
 }
 $('themes').addEventListener('click', e => {
   const b = e.target.closest('.theme');
-  if (!b || b.disabled || b.dataset.id === state.theme) return;
+  if (!b || b.disabled) return;
+  if (b.dataset.locked === 'true') { showPurchase(b.dataset.id); return; }
+  if (b.dataset.id === state.theme) return;
   state.theme = b.dataset.id;
   send({ t: 'theme', id: state.theme });
   if (seedOf(state.theme) === undefined) setSeed(newSeed(), false);   // 还没有种子：给一个，桌面和预览从一开始就是同一张
@@ -600,9 +641,15 @@ $('shareVideo').addEventListener('click', () => {
     showShare({ ok: true, kind: 'video', url, full: url, thumb: r.poster, ext: r.mime === 'video/webm' ? 'webm' : 'mp4' });
   }, e => showShare({ ok: false, kind: 'video', msg: e.message }));
 });
+$('purchaseLater').addEventListener('click', closePurchase);
+$('purchaseModal').addEventListener('click', e => { if (e.target === $('purchaseModal')) closePurchase(); });
+$('purchaseWebsite').addEventListener('click', () => {
+  if (host) send({ t: 'openWebsite' });
+  else window.open('https://deskland.app/', '_blank', 'noopener');
+});
 $('shareClose').addEventListener('click', closeShare);
 $('shareModal').addEventListener('click', e => { if (e.target === $('shareModal')) closeShare(); });
-addEventListener('keydown', e => { if (e.key === 'Escape') closeShare(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') { closeShare(); closePurchase(); } });
 $('shareOpen').addEventListener('click', () => send({ t: 'openShare' }));
 $('shareReveal').addEventListener('click', () => send({ t: 'revealShare' }));
 
