@@ -1,16 +1,17 @@
-# Deskland
+# Deskland Preview
 
 让桌面图标成为风景的一部分。 / Let your desktop icons become part of the scenery.
 
-Deskland 是一款 Windows 自适应动态壁纸。移动桌面图标时，海岸线、草地与云会实时调整，让图标融入画面。
+Deskland Preview 是一款 Windows 自适应动态壁纸体验版。移动桌面图标时，海岸线、草地与云会实时调整，让图标融入画面。
 
-本仓库是免费的开源体验版，包含 **沙滩** 和 **草地** 两个主题，没有使用时限。无需账号或 API Key。
+本仓库是免费的开源体验版，包含 **沙滩** 和 **草地** 两个可用主题，没有使用时限。无需账号或 API Key。其他主题的缩略图用于展示壁纸版内容，不包含这些主题的页面源码。Preview 与开发版使用不同的安装目录、用户数据、启动项和运行实例标识，可以同时保留。
 
 ## 功能
 
 - 根据真实桌面图标的位置生成场景，并在图标移动、添加或删除时平滑调整。
 - 沙滩上的海浪、皮划艇、海鸟和椰子树。
 - 草地上的云影、放风筝的男孩和小黑猫。
+- 其他主题显示带锁缩略图，点击可查看壁纸版说明并前往官网。
 - 中英文设置界面，主题参数自动保存。
 - 托盘控制、开机自动启动、前台窗口最大化或全屏时暂停。
 - 分享图片和动画时使用示例图标与名字色块，不截取桌面窗口或真实文件名。
@@ -39,11 +40,11 @@ host\bin\Deskland.exe
 host\bin\Deskland.exe --exit
 ```
 
-程序设置与日志位于 `%LOCALAPPDATA%\Deskland`。沙滩和草地的设置可持续保留；同一时间只运行一个 Deskland 实例。
+程序设置与日志位于 `%LOCALAPPDATA%\DesklandPreview`。沙滩和草地的设置可持续保留；同一时间只运行一个 Deskland Preview 实例，开发版的设置和实例不受影响。
 
 ## Windows 安装包
 
-体验版安装包名为 `Deskland-Preview-0.1.0-win-x64-Setup.exe`，安装到当前用户目录，无需管理员权限。开始菜单中可启动和卸载 Deskland，卸载保留用户设置。安装包自带对应源码 `Deskland-source.zip`。
+体验版安装包名为 `Deskland-Preview-0.1.2-win-x64-Setup.exe`，安装到当前用户的 `Programs\Deskland Preview` 目录，无需管理员权限。开始菜单的 `Deskland Preview` 文件夹中可启动和卸载，卸载保留用户设置。安装包自带对应源码 `Deskland-source.zip`。
 
 已安装 WebView2 Runtime 时可离线安装；缺少时会调用微软引导程序联网安装。当前安装包未签名。
 
@@ -67,7 +68,7 @@ node prototype\serve.mjs
 | `prototype/flat.html` | 沙滩主题 |
 | `prototype/meadow.html` | 草地主题 |
 | `prototype/settings.html` | 设置界面 |
-| `prototype/themes.json` | 两个主题的参数与缩略图 |
+| `prototype/themes.json` | 两个免费主题的完整参数，以及其他主题的锁定展示信息与缩略图 |
 | `prototype/share.js` | 分享图片和动画 |
 | `prototype/assets/` | 主题所需的图片素材 |
 

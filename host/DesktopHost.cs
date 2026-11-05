@@ -49,7 +49,7 @@ static class Program
         if (args.Length > 0 && args[0] == "--menu") { Signal(MenuEventName); return; }
         if (args.Length > 0 && args[0] == "--settings") { Signal(SettingsEventName); return; }
         if (args.Length > 0 && args[0] == "--exit-installed") { Environment.ExitCode = InstallProfile.StopInstalled(); return; }
-        if (!InstallProfile.Isolated) Rename.Migrate();                                 // 老名字（Habitat Wallpaper）下的数据目录、开机自启项搬过来
+        // Preview never migrates or shares the development edition's settings.                                 // 老名字（Habitat Wallpaper）下的数据目录、开机自启项搬过来
         bool fromAutostart = Array.IndexOf(args, "--autostart") >= 0;
         if (fromAutostart) AutoStartCheck.MarkLaunched();  // 开机自启跑起来了（不管后面是不是已经在运行）
         bool created;
@@ -261,7 +261,7 @@ static class Settings
 // 设置里的"语言"默认"跟随系统"：用 Windows 的界面语言；不支持的语言用英文
 static class I18n
 {
-    // 先做简体中文、英文（2026-10-14）；以后加语言：放一个 i18n/<语言>.json，再加进这里和设置页的 LANGS
+    // 增加语言时同步设置页 LANGS 与体验版导出的语言列表。
     public static readonly string[] Supported = { "zh-CN", "en" };
     public static string Code = "zh-CN", Sys = "en";     // 现在用的语言；"跟随系统"时会用的语言
     static Dictionary<string, object> cur, en, zh;
@@ -307,32 +307,12 @@ static class I18n
     }
 }
 
-// 主题清单（prototype/themes.json）：主题 id → 页面；只有 status 为 ready 的主题可用
-static class Themes
-{
-    public static string PageFor(string pageDir, string id)
-    {
-        try
-        {
-            var root = Json.Parse(File.ReadAllText(Path.Combine(pageDir, "themes.json"), Encoding.UTF8)) as Dictionary<string, object>;
-            foreach (object o in (System.Collections.IEnumerable)root["themes"])
-            {
-                var t = o as Dictionary<string, object>;
-                if (t != null && (t["id"] as string) == id && t.ContainsKey("status") && (t["status"] as string) == "ready")
-                    return t["page"] as string;
-            }
-        }
-        catch (Exception ex) { Log.Write("读取 themes.json 失败：" + ex.Message); }
-        return null;
-    }
-}
-
 // 整个程序的生命周期：托盘图标常驻；壁纸窗口没了就重新建一个
 // 打开菜单的方式：托盘图标左键 / 右键、快捷键 Ctrl+Alt+H（或 --menu）
 // 打开设置的方式：双击程序（没运行就先启动再打开）、双击托盘图标、菜单 → 设置…（或 --settings）
 class HostContext : ApplicationContext
 {
-    public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "Deskland";
+    public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "DesklandPreview";
     static readonly MethodInfo ShowTrayMenu =
         typeof(NotifyIcon).GetMethod("ShowContextMenu", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -348,6 +328,8 @@ class HostContext : ApplicationContext
     DateTime nextStart = DateTime.MaxValue, saveDue = DateTime.MaxValue;
     bool manualPause, exiting;
     string autoStartSw;                                 // 开机自启没跑起来（只在手动打开时检查）：正在运行的安全软件名（没认出来是 ""）；没问题是 null
+    string updateVersion, updateUrl, updateStatus = "", updateError = "";
+    double updateProgress = -1;                         // -1 = 当前阶段没有可显示的百分比
 
     public HostContext(string pageDir, bool showSettings)
     {
@@ -373,15 +355,27 @@ class HostContext : ApplicationContext
         });
         autoStartItem = new MenuItem(I18n.T("trayAutostart"), delegate { SetAutoStart(!autoStartItem.Checked); });
         autoStartItem.Checked = IsAutoStart();
-        if (autoStartItem.Checked && AutoStartValue().IndexOf("--autostart") < 0)
-            using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))   // 旧版本写的启动项没有 --autostart，补上
-                k.SetValue(RunName, "\"" + Application.ExecutablePath + "\" --autostart");
+        if (autoStartItem.Checked && AutoStartValue() != "")
+        {
+            try
+            {
+                if (CreateAutoStartShortcut())
+                {
+                    DeleteRunAutoStart();
+                    Log.Write("开机自动启动已迁移到当前用户启动文件夹");
+                }
+                else if (AutoStartValue().IndexOf("--autostart") < 0)
+                    using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))   // 回退项缺参数时补上
+                        k.SetValue(RunName, "\"" + Application.ExecutablePath + "\" --autostart");
+            }
+            catch (Exception ex) { Log.Write("迁移开机自动启动失败，保留原启动项：" + ex.Message); }
+        }
         settingsItem = new MenuItem(I18n.T("traySettings"), delegate { OpenSettings(); });
         settingsItem.DefaultItem = true;                // 粗体：主入口
 
         tray = new NotifyIcon();
         tray.Icon = AppIcon.Create();
-        tray.Text = "Deskland";
+        tray.Text = "Deskland Preview";
         tray.ContextMenu = new ContextMenu(new[] {
             settingsItem,
             pauseItem,
@@ -426,8 +420,9 @@ class HostContext : ApplicationContext
         if (settingsWin.WindowState == FormWindowState.Minimized) settingsWin.WindowState = FormWindowState.Normal;
         settingsWin.Show();
         // 外部以 SW_HIDE 启动时，WinForms 的 Visible 状态可能已是 true，
-        // 但原生窗口仍被隐藏；Activate / 再次 Show 不会修复，必须显式显示。
-        Native.ShowWindow(settingsWin.Handle, Native.SW_SHOW);
+        // 但原生窗口仍被隐藏；Activate / 再次 Show 不会修复，必须显式还原。
+        // SW_RESTORE 同时处理隐藏和最小化，SW_SHOW 不会展开已最小化的窗口。
+        Native.ShowWindow(settingsWin.Handle, Native.SW_RESTORE);
         settingsWin.Activate();
     }
 
@@ -436,9 +431,39 @@ class HostContext : ApplicationContext
         return Json.Stringify(Json.Obj("t", "settings", "v", Settings.For(Settings.Theme)));
     }
 
+    string UpdateStateMessage()
+    {
+        return Json.Stringify(Json.Obj("t", "updateState", "version", updateVersion,
+            "status", updateStatus, "progress", updateProgress, "error", updateError));
+    }
+
+    void PostUpdateState()
+    {
+        if (settingsWin != null) settingsWin.Post(UpdateStateMessage());
+    }
+
+    // 仅用于开发联调或非商店更新源；商店版始终使用 StoreContext，不接受网页传入地址。
+    public void OfferUpdate(string version, string url)
+    {
+        Uri uri;
+        if (string.IsNullOrWhiteSpace(version) || !Uri.TryCreate(url, UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps)
+            throw new ArgumentException("更新信息需要版本号和有效的 HTTPS 地址");
+        updateVersion = version.Trim();
+        updateUrl = uri.AbsoluteUri;
+        updateStatus = "available";
+        updateProgress = -1;
+        updateError = "";
+        PostUpdateState();
+    }
+
     void SaveSoon() { saveDue = DateTime.Now.AddMilliseconds(600); }
 
-    // 设置页发来的消息：hello / set / reset / theme / autostart / lang
+    bool ThemeAllowed(string id)
+    {
+        return Themes.Allowed(pageDir, id, delegate(string product) { return false; });
+    }
+
+    // 设置页发来的消息：hello / set / reset / theme / autostart / lang / updateProgram
     public void OnSettingsMessage(string s)
     {
         var m = Json.Parse(s) as Dictionary<string, object>;
@@ -453,6 +478,7 @@ class HostContext : ApplicationContext
                     "screen", Json.Obj("w", scr.Width, "h", scr.Height), "autostart", IsAutoStart(),
                     "autostartWarn", autoStartSw != null, "autostartSw", autoStartSw ?? "",
                     "lang", Settings.Lang, "langEff", I18n.Code, "langSys", I18n.Sys)));
+                if (updateVersion != null) PostUpdateState();
                 if (form != null && form.LastIcons != "") settingsWin.Post(form.LastIcons);
                 break;
             case "set":
@@ -477,7 +503,14 @@ class HostContext : ApplicationContext
             }
             case "theme":
             {
-                string id = m["id"] as string, page = id == null ? null : Themes.PageFor(pageDir, id);
+                string id = m["id"] as string;
+                if (id == null || !ThemeAllowed(id))
+                {
+                    settingsWin.Post(Json.Stringify(Json.Obj("t", "themeChanged", "id", Settings.Theme)));
+                    Log.Write("拒绝未授权或未知主题切换：" + (id ?? "null"));
+                    return;
+                }
+                string page = Themes.PageFor(pageDir, id);
                 if (page == null || id == Settings.Theme) return;
                 Settings.Theme = id;
                 SaveSoon();
@@ -510,8 +543,14 @@ class HostContext : ApplicationContext
             case "openShare":
                 if (lastShare != null && File.Exists(lastShare)) Process.Start(lastShare);
                 break;
+            case "openWebsite":
+                Process.Start("https://deskland.app/");
+                break;
             case "revealShare":
                 if (lastShare != null && File.Exists(lastShare)) Process.Start("explorer.exe", "/select,\"" + lastShare + "\"");
+                break;
+            case "updateProgram":
+                if (updateUrl != null) Process.Start(updateUrl);
                 break;
             case "autostart":
                 SetAutoStart(m["v"] is bool && (bool)m["v"]);
@@ -529,7 +568,7 @@ class HostContext : ApplicationContext
         {
             int comma = png.IndexOf(',');
             byte[] bytes = Convert.FromBase64String(comma >= 0 ? png.Substring(comma + 1) : png);
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland");
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland Preview");
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, "Deskland " + DateTime.Now.ToString("yyyy-MM-dd HHmmss") + ".png");
             File.WriteAllBytes(path, bytes);
@@ -569,7 +608,7 @@ class HostContext : ApplicationContext
         {
             int comma = video.IndexOf(',');
             byte[] bytes = Convert.FromBase64String(comma >= 0 ? video.Substring(comma + 1) : video);
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland");
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Deskland Preview");
             Directory.CreateDirectory(dir);
             string name = "Deskland " + DateTime.Now.ToString("yyyy-MM-dd HHmmss") + (mime == "video/webm" ? ".webm" : ".mp4");
             string path = Path.Combine(dir, name);
@@ -620,7 +659,65 @@ class HostContext : ApplicationContext
         catch (Exception ex) { Log.Write("首次提示失败：" + ex.Message); }
     }
 
-    // 开机自动启动：写在当前用户的 Run 项里，只有用户在菜单里打勾才会写
+    // 开机自动启动：优先用当前用户“启动”文件夹里的快捷方式；旧 Run 项启动时迁移。
+    // 不使用需要额外权限的任务计划；快捷方式创建失败时仍保留 Run 项作为回退。
+    static string AutoStartShortcutPath
+    {
+        get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Deskland.lnk"); }
+    }
+
+    static object OpenAutoStartShortcut()
+    {
+        object shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+        try
+        {
+            return shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod,
+                null, shell, new object[] { AutoStartShortcutPath });
+        }
+        finally { Marshal.FinalReleaseComObject(shell); }
+    }
+
+    static bool AutoStartShortcutEnabled()
+    {
+        if (!File.Exists(AutoStartShortcutPath)) return false;
+        object link = null;
+        try
+        {
+            link = OpenAutoStartShortcut();
+            string target = link.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty,
+                null, link, null) as string;
+            string arguments = link.GetType().InvokeMember("Arguments", BindingFlags.GetProperty,
+                null, link, null) as string;
+            return string.Equals(target, Application.ExecutablePath, StringComparison.OrdinalIgnoreCase)
+                && arguments != null && arguments.IndexOf("--autostart", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        catch { return false; }
+        finally { if (link != null) Marshal.FinalReleaseComObject(link); }
+    }
+
+    static bool CreateAutoStartShortcut()
+    {
+        object link = null;
+        try
+        {
+            link = OpenAutoStartShortcut();
+            link.GetType().InvokeMember("TargetPath", BindingFlags.SetProperty,
+                null, link, new object[] { Application.ExecutablePath });
+            link.GetType().InvokeMember("Arguments", BindingFlags.SetProperty,
+                null, link, new object[] { "--autostart" });
+            link.GetType().InvokeMember("WorkingDirectory", BindingFlags.SetProperty,
+                null, link, new object[] { Path.GetDirectoryName(Application.ExecutablePath) });
+            link.GetType().InvokeMember("IconLocation", BindingFlags.SetProperty,
+                null, link, new object[] { Application.ExecutablePath + ",0" });
+            link.GetType().InvokeMember("Description", BindingFlags.SetProperty,
+                null, link, new object[] { "Deskland" });
+            link.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, link, null);
+            return File.Exists(AutoStartShortcutPath);
+        }
+        catch (Exception ex) { Log.Write("创建启动文件夹快捷方式失败：" + ex.Message); return false; }
+        finally { if (link != null) Marshal.FinalReleaseComObject(link); }
+    }
+
     static string AutoStartValue()
     {
         if (InstallProfile.Isolated) return "";
@@ -631,9 +728,16 @@ class HostContext : ApplicationContext
         }
     }
 
+    static void DeleteRunAutoStart()
+    {
+        using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKey, true))
+            if (k != null) k.DeleteValue(RunName, false);
+    }
+
     static bool IsAutoStart()
     {
-        return AutoStartValue().IndexOf(Application.ExecutablePath, StringComparison.OrdinalIgnoreCase) >= 0;
+        return AutoStartShortcutEnabled()
+            || AutoStartValue().IndexOf(Application.ExecutablePath, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     void SetAutoStart(bool on)
@@ -641,12 +745,22 @@ class HostContext : ApplicationContext
         if (InstallProfile.Isolated) return;
         try
         {
-            using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))
+            if (on)
             {
-                if (on) { k.SetValue(RunName, "\"" + Application.ExecutablePath + "\" --autostart"); AutoStartCheck.MarkEnabled(); }
-                else k.DeleteValue(RunName, false);
+                bool shortcut = CreateAutoStartShortcut();
+                if (shortcut) DeleteRunAutoStart();
+                else
+                    using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))
+                        k.SetValue(RunName, "\"" + Application.ExecutablePath + "\" --autostart");
+                AutoStartCheck.MarkEnabled();
+                Log.Write(shortcut ? "已开启开机自动启动（当前用户启动文件夹）" : "已开启开机自动启动（传统启动项回退）");
             }
-            Log.Write(on ? "已开启开机自动启动" : "已关闭开机自动启动");
+            else
+            {
+                DeleteRunAutoStart();
+                if (File.Exists(AutoStartShortcutPath)) File.Delete(AutoStartShortcutPath);
+                Log.Write(IsAutoStart() ? "关闭开机自动启动失败，启动项仍存在" : "已关闭开机自动启动");
+            }
         }
         catch (Exception ex) { Log.Write("设置开机自动启动失败：" + ex.Message); }
         autoStartItem.Checked = IsAutoStart();
@@ -655,8 +769,14 @@ class HostContext : ApplicationContext
     void StartForm()
     {
         nextStart = DateTime.MaxValue;
-        string page = Themes.PageFor(pageDir, Settings.Theme);
-        if (page == null) { Settings.Theme = "beach"; page = Themes.PageFor(pageDir, "beach") ?? "flat.html"; }
+        if (!ThemeAllowed(Settings.Theme)) Settings.Theme = ThemeAllowed("beach") ? "beach" : "meadow";
+        string page = ThemeAllowed(Settings.Theme) ? Themes.PageFor(pageDir, Settings.Theme) : null;
+        if (page == null)
+        {
+            Log.Write("没有可加载的已授权主题，5 秒后重试");
+            nextStart = DateTime.Now.AddSeconds(5);
+            return;
+        }
         form = new WallpaperForm(pageDir, page, manualPause);
         form.SettingsJson = SettingsMessage;
         form.IconsChanged += delegate(string json) { if (settingsWin != null) settingsWin.Post(json); };
@@ -680,7 +800,7 @@ class HostContext : ApplicationContext
         if (restarts.Count > 5)
         {
             Log.Write("壁纸窗口 1 分钟内被销毁超过 5 次，停止重试");
-            MessageBox.Show(I18n.T("errRebuilt") + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland");
+            MessageBox.Show(I18n.T("errRebuilt") + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland Preview");
             Exit();
             return;
         }
@@ -746,27 +866,12 @@ class HotkeyWindow : NativeWindow, IDisposable
     }
 }
 
-// 托盘图标：运行时画一个海边小图标（青蓝的海 + 奶白沙滩 + 一道白浪），不依赖图片文件
+// 托盘和设置窗口共用 Deskland 图标；构建脚本会把图标复制到程序目录。
 static class AppIcon
 {
     public static Icon Create()
     {
-        var bmp = new Bitmap(32, 32);
-        using (Graphics g = Graphics.FromImage(bmp))
-        using (GraphicsPath tile = RoundRect(new Rectangle(1, 1, 30, 30), 8))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            using (var sea = new LinearGradientBrush(new Rectangle(0, 0, 32, 32), Color.FromArgb(0, 132, 178), Color.FromArgb(96, 214, 204), 135f))
-                g.FillPath(sea, tile);
-            g.SetClip(tile);
-            using (var shoal = new SolidBrush(Color.FromArgb(150, 220, 236, 214))) g.FillEllipse(shoal, -16, 9, 42, 36);
-            using (var sand = new SolidBrush(Color.FromArgb(250, 238, 220))) g.FillEllipse(sand, -12, 15, 34, 28);
-            using (var foam = new Pen(Color.White, 2.2f)) g.DrawArc(foam, -15, 11, 40, 35, 245, 120);
-            using (var kayak = new SolidBrush(Color.FromArgb(255, 210, 40))) g.FillEllipse(kayak, 20, 7, 7, 3);
-            g.ResetClip();
-        }
-        return Icon.FromHandle(bmp.GetHicon());
+        return new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DesklandPreview.ico"));
     }
 
     static GraphicsPath RoundRect(Rectangle r, int radius)
@@ -793,9 +898,9 @@ class SettingsForm : Form
     {
         this.pageDir = pageDir;
         this.host = host;
-        Text = "";
-        AccessibleName = "Deskland";
-        ShowIcon = false;
+        Text = "Deskland Preview";
+        AccessibleName = "Deskland Preview";
+        ShowIcon = true;
         Icon = AppIcon.Create();
         StartPosition = FormStartPosition.CenterScreen;
         float s = Native.GetDpiForSystem() / 96f;       // 进程按物理像素工作，窗口尺寸要自己按缩放比例算
@@ -856,7 +961,7 @@ class SettingsForm : Form
         catch (Exception ex)
         {
             Log.Write("设置窗口启动失败：" + ex);
-            MessageBox.Show(I18n.T("errSettings", "msg", ex.Message), "Deskland");
+            MessageBox.Show(I18n.T("errSettings", "msg", ex.Message), "Deskland Preview");
             Close();
         }
     }
@@ -956,7 +1061,7 @@ class WallpaperForm : Form
         if (done != null) done(thumb, png, err);
     }
 
-    // ---- 分享动画：请页面录一段（拖动图标、画面跟着变），途中发进度，录完发 "record|格式|封面|整段视频" ----
+    // ---- 分享动画：按当前图标布局录制主题动画，途中发进度，录完发 "record|格式|封面|整段视频" ----
     Action<string, string, string, string> recordDone;    // (格式, 封面, 整段视频, 出错信息)
     System.Windows.Forms.Timer recordTimeout;
     public event Action<string> RecordProgress;            // 0..1（字符串）
@@ -1072,7 +1177,7 @@ class WallpaperForm : Form
     void Fail(string msg)
     {
         Log.Write(msg);
-        MessageBox.Show(msg + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland");
+        MessageBox.Show(msg + "\n\n" + I18n.T("errSeeLog", "path", Log.FilePath), "Deskland Preview");
         Fatal = true;
         Shutdown();
     }
@@ -1363,7 +1468,7 @@ static class Native
     public const int GWL_STYLE = -16, GWL_EXSTYLE = -20, WS_EX_LAYERED = 0x00080000;
     public const uint LWA_ALPHA = 0x2, SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002;
     public const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_NOREPEAT = 0x4000;
-    public const int SW_SHOW = 5;
+    public const int SW_SHOW = 5, SW_RESTORE = 9;
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint vk);
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
@@ -1414,19 +1519,19 @@ static class Native
     [DllImport("kernel32.dll")] public static extern bool ReadProcessMemory(IntPtr proc, IntPtr addr, out RECT buf, int size, out IntPtr read);
 }
 
-// Optional isolated profile for installation QA; normal launches keep the existing data directory.
+// Deskland Preview has its own data and instance identity; isolated profiles support installation QA.
 static class InstallProfile
 {
     public static readonly string Override = Environment.GetEnvironmentVariable("DESKLAND_PROFILE_DIR");
     public static readonly bool Isolated = !string.IsNullOrEmpty(Override);
     public static readonly string DataDir = Isolated ? Path.GetFullPath(Override) : Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deskland");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesklandPreview");
     public static readonly string Suffix = MakeSuffix();
     static string MakeSuffix()
     {
-        if (!Isolated) return "";
+        if (!Isolated) return "_Preview";
         using (var hash = System.Security.Cryptography.SHA256.Create())
-            return "_" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(DataDir.ToUpperInvariant()))).Replace("-", "").Substring(0, 24);
+            return "_Preview_" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(DataDir.ToUpperInvariant()))).Replace("-", "").Substring(0, 24);
     }
 
     // An installer may only close the instance using this exact executable path.

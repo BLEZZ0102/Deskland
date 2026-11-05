@@ -160,10 +160,10 @@ const PREVIEW = QS.has('preview');     // 预览模式：设置窗口里的缩�
 const P = {
   sigma: 72, warp: 40, edge: 10, cover: 0.3, flow: 1, grain: 1, quality: 2,   // quality 2：按屏幕的实际像素画（150% 缩放时不再放大发糊）
   debug: false, snap: true, cap30: true,
-  showBoy: 1, showCat: 1,
+  showBoy: 1, showCat: 1, adaptive: 1,
 };
 const DEFAULTS = Object.assign({}, P);
-const DISPLAY_KEYS = ['showBoy', 'showCat'];
+const DISPLAY_KEYS = ['showBoy', 'showCat', 'adaptive'];
 const SLIDERS = [
   { key: 'sigma',  label: '云团大小', min: 40,  max: 200, step: 1,    fmt: v => v + ' px', act: 'field' },
   { key: 'cover',  label: '草地上的云', min: 0,   max: 1,   step: 0.01, fmt: v => Math.round(v * 100) + '%' },
@@ -557,12 +557,13 @@ function uploadField(i, Fd) {
   const d = new Uint16Array(Gw * Gh);
   for (let k = 0; k < d.length; k++) d[k] = toHalf(Fd.s[k]);
   gl.bindTexture(gl.TEXTURE_2D, ftex[i]);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); // R16F 奇数宽度行也按紧凑数据上传
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Gw, Gh, gl.RED, gl.HALF_FLOAT, d);
 }
 
 const iconRects = () => icons.map(ic => ({ cx: ic.x + ic.w / 2, cy: ic.y + ic.h / 2, hw: ic.w / 2 - 4, hh: ic.h / 2 - 2 }));
 function commit(fromEmpty = false) {
-  const nf = computeField(iconRects());
+  const nf = computeField(P.adaptive ? iconRects() : []);
   const target = 1 - toI;
   if (fromEmpty) { FA = computeField([]); uploadField(toI, FA); }
   else FA = FB;
@@ -573,7 +574,7 @@ function commit(fromEmpty = false) {
   morphDur = fromEmpty ? 2600 : MORPH_MS;
 }
 function refresh() {
-  FA = FB = computeField(iconRects());
+  FA = FB = computeField(P.adaptive ? iconRects() : []);
   uploadField(toI, FB);
   fromI = toI; morphT0 = -1e9;
 }
@@ -1083,14 +1084,16 @@ requestAnimationFrame(frame);
 // 应用设置：只接受面板上有的参数；云团大小要重算场
 function applySettings(v) {
   if (typeof v.seed === 'number' && v.seed !== seed) reseed(v.seed);   // 设置窗口的"刷新"：换一张（桌面和预览用同一个种子）
-  let field = false;
+  let field = false, adaptiveChanged = false;
   for (const k in v) {
     if ((!SLIDERS.some(s => s.key === k) && !DISPLAY_KEYS.includes(k)) || typeof v[k] !== typeof P[k] || P[k] === v[k]) continue;
     if (DISPLAY_KEYS.includes(k) && v[k] !== 0 && v[k] !== 1) continue;
     P[k] = v[k];
+    if (k === 'adaptive') adaptiveChanged = true;
     if (k === 'sigma') field = true;
   }
-  if (field && FB) refresh();
+  if (adaptiveChanged && FB) commit();
+  else if (field && FB) refresh();
 
 }
 

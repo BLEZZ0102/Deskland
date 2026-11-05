@@ -95,12 +95,14 @@ function beachPalmClear(x, y, radius) {
 }
 function chooseMaldivesPalms() {
   const random = mulberry32((seed ^ 0x41fc72) >>> 0), chosen = [], order = BEACH_PALM_STYLES.map((_, i) => i);
-  while (order.length < 4) order.push(Math.floor(random() * BEACH_PALM_STYLES.length));
   for (let i = order.length - 1; i > 0; i--) {const j = Math.floor(random() * (i + 1));[order[i], order[j]] = [order[j], order[i]];}
+  const styleRandom = mulberry32((seed ^ 0x6ac309) >>> 0);
+  while (order.length < 10) order.push(Math.floor(styleRandom() * BEACH_PALM_STYLES.length));
   // 在整片合适的沙地中均匀抽选，不偏向同一条等距岸线；固定种子避免每帧跳动。
-  for (const variant of order.slice(0, 4)) {
-    const style = BEACH_PALM_STYLES[variant], spacing = 95 + random() * 50;let selected = null;
-    for (const baseScale of [.62, .53, .45, .36, .30]) {
+  for (const variant of order) {
+    const style = BEACH_PALM_STYLES[variant], spacing = 60 + random() * 35;let selected = null;
+    // 只尝试正常尺寸；沙地或图标间距不足时省略这棵树，不缩成迷你树。
+    for (const baseScale of [.62]) {
       const scale = baseScale * .80 * (style.size || 1);
       const radius = style.radius * scale, offsetX = random() * 13, offsetY = random() * 13;let best = null, candidates = 0;
       for (let y = 100 * scale + offsetY; y < H - TASKBAR - 55 * scale; y += 13) for (let x = radius + 5 + offsetX; x < W - radius - 5; x += 13) {
@@ -126,14 +128,19 @@ function drawMaldivesPalms(now, pass, configurePass, context) {
   if (!FB || !beachPalmImages.every(image => image.complete && image.naturalWidth)) return;
   if (!beachPalmsScene) beachPalmsScene = {atlas: makeMaldivesPalmAtlas(), palms: [], previous: now};
   const scene = beachPalmsScene, dt = Math.max(0, Math.min(.1, (now - scene.previous) / 1000));scene.previous = now;
-  if (scene.field !== FB || scene.seed !== seed || scene.width !== W || scene.height !== H) {
-    const next = chooseMaldivesPalms();
+  const count = Math.max(0, Math.min(10, Math.round(Number.isFinite(P.palms) ? P.palms : 4)));
+  const layoutChanged = scene.field !== FB || scene.seed !== seed || scene.width !== W || scene.height !== H;
+  if (layoutChanged || scene.count !== count) {
+    if (layoutChanged || !scene.placements) scene.placements = count ? chooseMaldivesPalms() : null;
+    if (count && !scene.placements) scene.placements = chooseMaldivesPalms();
+    const next = (scene.placements || []).slice(0, count);
     for (const old of scene.palms) old.retiring = true;
     for (const p of next) {
       const old = scene.palms.find(q => Math.hypot(q.x - p.x, q.y - p.y) < 26 && Math.abs(q.scale - p.scale) < .02);
-      if (old && old.mirror === p.mirror) {old.retiring = false;old.variant = p.variant;} else scene.palms.push(p);
+      if (old && old.mirror === p.mirror) {old.retiring = false;old.variant = p.variant;} else scene.palms.push({...p, opacity: 0, retiring: false});
     }
     scene.field = FB;scene.seed = seed;scene.width = W;scene.height = H;
+    scene.count = count;
   }
   configurePass(now, pass, context);
   gl.activeTexture(gl.TEXTURE6);gl.bindTexture(gl.TEXTURE_2D, scene.atlas);gl.uniform1i(pass.U.uPalmAtlas, 6);

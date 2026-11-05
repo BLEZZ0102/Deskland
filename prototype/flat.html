@@ -61,7 +61,7 @@
     color: #eef6f5; border: 1px solid rgba(255,255,255,.14); border-radius: 12px;
     font-size: 12px; line-height: 1.4; box-shadow: 0 12px 32px rgba(0,0,0,.25); z-index: 50;
   }
-  #panel.hidden { display: none; }
+  #panel, #panel.hidden { display: none; }
   /* 壁纸模式（?wallpaper=1，由桌面宿主程序加载）：真实图标和任务栏由 Windows 自己画 */
   body.wall #panel, body.wall #taskbar, body.wall #desktop { display: none; }
   /* 预览模式（?preview=1，设置窗口里）：用半透明的方块示意真实图标的位置 */
@@ -118,7 +118,7 @@
   <div id="clock"></div>
 </div>
 
-<aside id="panel">
+<aside id="panel" hidden>
   <header>
     <div><b>Deskland</b><span>沙滩 · 原型 v0.4</span></div>
     <div><button class="ibtn" id="collapse" title="折叠">–</button></div>
@@ -164,10 +164,11 @@ const PREVIEW = QS.has('preview');     // 预览模式：设置窗口里的缩�
 const P = {
   sigma: 85, warp: 34, shallow: 260, shoal: 110,
   speed: 22, runup: 120, wave: 1.6, spacing: 70, waves: 1, grain: 1, quality: 2,   // quality 2：按屏幕的实际像素画（150% 缩放时不再放大发糊）
-  kayaks: 2, birds: 3, debug: false, snap: true, cap30: true,
+  kayaks: 2, birds: 3, palms: 4, debug: false, snap: true, cap30: true,
 };
 const DEFAULTS = Object.assign({}, P);
 const SLIDERS = [
+  { key: 'palms', label: '椰子树数量', min: 0, max: 10, step: 1, fmt: v => v + ' 棵' },
   { key: 'sigma',   label: '离岸距离', min: 40,  max: 200, step: 1,    fmt: v => v + ' px', act: 'field' },
   { key: 'warp',    label: '海岸曲折', min: 0,   max: 80,  step: 1,    fmt: v => v,         act: 'field' },
   { key: 'shoal',   label: '透明浅滩', min: 0,   max: 300, step: 1,    fmt: v => v + ' px' },
@@ -743,6 +744,8 @@ function uploadField(i, Fd) {
   const d = new Uint16Array(Gw * Gh);
   for (let k = 0; k < d.length; k++) d[k] = toHalf(Fd.s[k]);
   gl.bindTexture(gl.TEXTURE_2D, ftex[i]);
+  // R16F 每像素 2 字节；奇数网格宽度时每行不是 4 的倍数，按实际紧凑数据上传。
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Gw, Gh, gl.RED, gl.HALF_FLOAT, d);
 }
 
@@ -1218,7 +1221,7 @@ function applySettings(v) {
   let field = false, kay = false, bird = false;
   for (const k in v) {
     if (!SLIDERS.some(s => s.key === k) || typeof v[k] !== typeof P[k] || P[k] === v[k]) continue;
-    P[k] = v[k];
+    P[k] = k === 'palms' ? Math.max(0, Math.min(10, Math.round(Number.isFinite(v[k]) ? v[k] : DEFAULTS.palms))) : v[k];
     if (k === 'sigma' || k === 'warp') field = true;
     else if (k === 'kayaks') kay = true;
     else if (k === 'birds') bird = true;

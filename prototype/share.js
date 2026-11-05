@@ -118,9 +118,9 @@
   window.desklandSnapshot = function (scale) { const c = snapshot(scale); return { canvas: c, thumb: thumbOf(c, 520) }; };
   window.desklandSnapshot.parts = { snapshot, drawSampleIcons, sampleGlyph, sampleLabel, thumbOf };   // 调试、测时间用
 
-  /* ---- 分享动画：录一段几秒钟的视频——拖动一两个图标，松手后画面跟着变 ----
-     画面还是主题自己画（真的把图标挪了、真的重算场），每画好一帧就拷到录像用的画布上，再画上示例图标、拖动中的图标和鼠标指针。
-     录完把图标放回原来的位置（壁纸会再变回去）。录的时候壁纸要一直在动：暂停着就先放开，录完再恢复 */
+  /* ---- 分享动画：按当前桌面布局录制12秒主题动画，图标与文件名仍用示例图形保护隐私 ----
+     不模拟拖动、不添加临时图标、不重算图标场。暂停着就先放开，录完恢复暂停状态。
+     只有网站离线演示工具显式指定 __recDemoStyle 时，才保留拖动演示编排。 */
   // 挑要拖的图标和放下的位置：从图标扎堆的地方拖出来，放到离别的图标最远的格子上（不贴画面边、拖的距离适中）
   function planMoves(list, n, only) {
     const H2 = H - TASKBAR, cells = [];
@@ -274,25 +274,26 @@
     const old = { w: cv.width, h: cv.height, s: cv._scale };
     const hasLabels = typeof renderLabels === 'function';
     const hasCache = typeof cacheOK !== 'undefined';
-    const saved = icons.map(ic => [ic, ic.x, ic.y]);
-    // 桌面上一个图标都没有：临时放一个，再拖它
-    const temp = icons.length ? null : { x: W * 0.28, y: (H - TASKBAR) * 0.3, w: 76, h: 92 };
+    const demo = !WALL && !!window.__recDemoStyle;
+    const saved = demo ? icons.map(ic => [ic, ic.x, ic.y]) : [];
+    // 仅离线演示允许添加临时图标；普通分享保持空桌面。
+    const temp = demo && !icons.length ? { x: W * 0.28, y: (H - TASKBAR) * 0.3, w: 76, h: 92 } : null;
     if (temp) { icons.push(temp); commit(); }
     // 网页演示的编排（__recDemoStyle）：先单独拖"离屏幕中心最近的图标"（演示布局中间那个主角），
     // 再框选拖走左边一整片（演示布局两排共 5 个）——正好是"移动 1 个 / 移动多个"两种方式
-    let moves;
-    if (window.__recDemoStyle && !temp) {
+    let moves = [];
+    if (demo && !temp) {
       const cx = W / 2, cy = (H - TASKBAR) / 2;
       const hero = icons.reduce((a, b) => Math.hypot(a.x + a.w / 2 - cx, a.y + a.h / 2 - cy) <= Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy) ? a : b);
       moves = planMoves(icons, 1, hero);
-    } else moves = planMoves(icons, temp ? 1 : 2);
+    } else if (demo) moves = planMoves(icons, temp ? 1 : 2);
     const HOLD0 = 0.8, DRAG = 1.5, ADAPT = 2.6, HOLD1 = 0.6;
     // 框选一批：0.3~1.1 秒拉选框，1.1~1.5 秒指针移到其中一个图标上，1.6~2.8 秒拖过去，松手后画面变 2.9 秒
     const GSEL = 1.1, GDROP = 2.8, GADAPT = 2.9;
     const after = new Map(icons.map(ic => [ic, [ic.x, ic.y]]));
     for (const m of moves) after.set(m.ic, m.to);
-    let grp = temp ? null : planGroup(icons, after);
-    if (window.__recDemoStyle && !temp) {
+    let grp = demo && !temp ? planGroup(icons, after) : null;
+    if (demo && !temp) {
       // 网页演示：多选固定框"右侧那两小排"（演示布局里列 2、3 的前 3 行那 6 个）
       const bx0 = GRID_X0 + 2 * CELL_W - 2, bx1 = GRID_X0 + 4 * CELL_W - 2, by1 = GRID_Y0 + 3 * CELL_H - 2;
       const block = icons.filter(ic => ic.x >= bx0 && ic.x < bx1 && ic.y < by1);
@@ -301,7 +302,7 @@
     if (grp) moves.push(grp);
     let tt = HOLD0;
     for (const m of moves) { m.t0 = tt; m.done = false; tt += m.kind === 'group' ? GDROP + GADAPT : DRAG + ADAPT; }
-    const total = tt + HOLD1;
+    const total = demo ? tt + HOLD1 : 12;
 
     cv.width = outW; cv.height = outH; cv._scale = rs;
     if (hasLabels && labelsReady()) renderLabels();
@@ -333,7 +334,7 @@
         cv.width = old.w; cv.height = old.h; cv._scale = old.s;
         if (hasLabels && labelsReady()) renderLabels();
         if (hasCache) cacheOK = false;
-        commit();                                            // 图标放回原处：壁纸跟着变回去
+        if (demo) commit();                                  // 仅演示编排需要恢复图标场
         if (typeof paused !== 'undefined') paused = hostPause === null ? wasPaused : hostPause;
         busy = false;
         if (err) { try { mr.stop(); } catch (e) { } reject(err); return; }
