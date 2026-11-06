@@ -75,7 +75,7 @@ The first build downloads portable NSIS and Microsoft's WebView2 bootstrapper. A
 
 The installer targets the current user's `Programs\Deskland Preview` directory and does not require administrator rights. If WebView2 is missing, its bootstrapper requires an internet connection. Uninstalling preserves user settings.
 
-**The current installer is an unsigned local test build and has not been published as a GitHub Release.**
+[Download Deskland Preview for Windows](https://github.com/BLEZZ0102/Deskland/releases/latest). The installer is unsigned, so Windows SmartScreen may show a warning.
 
 ## Project layout
 
@@ -183,7 +183,7 @@ powershell -ExecutionPolicy Bypass -File tools\build-installer.ps1
 
 安装包安装到当前用户的 `Programs\Deskland Preview` 目录，无需管理员权限。缺少 WebView2 时需要联网安装；卸载保留用户设置。
 
-**当前安装包是未签名的本地测试构建，尚未发布 GitHub Release。**
+[下载 Deskland Preview Windows 安装包](https://github.com/BLEZZ0102/Deskland/releases/latest)。安装包未签名，Windows SmartScreen 可能显示提示。
 
 ### 目录结构
 
