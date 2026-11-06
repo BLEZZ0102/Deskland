@@ -15,3 +15,4 @@
 - 不提交 `host/bin/`、`host/lib/`、个人数据、凭证或本机路径。
 - 发布或修改商标相关内容前须获得项目负责人的明确指示。
 - 许可见 `LICENSE`，名称和图标的说明见 `TRADEMARKS.md`。
+- 2026-11-06：已发布 GitHub Release `v0.1.2`，包含 Windows x64 安装包、对应源码 ZIP、SHA256 和文件清单；README 提供最新 Release 下载入口。仓库仍保持 PRIVATE，安装包未签名。
