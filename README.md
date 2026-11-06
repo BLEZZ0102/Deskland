@@ -8,6 +8,14 @@ This is the **free, open-source Preview**, not a time-limited trial. It includes
 
 **English** · [简体中文](#中文说明) · [Official website](https://deskland.app) · [Features](#features) · [Build from source](#build-from-source)
 
+![Meadow — included in Deskland Preview](docs/images/meadow.webp)
+
+![Beach — included in Deskland Preview](docs/images/beach.webp)
+
+![Maldives — locked-theme preview](docs/images/maldives.webp)
+
+Meadow and Beach are included in Preview. Maldives is shown as a locked-theme preview.
+
 ## Included themes
 
 | Beach | Meadow |
