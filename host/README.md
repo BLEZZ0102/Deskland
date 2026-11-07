@@ -26,7 +26,7 @@ host\bin\Deskland.exe
 
 - 主题来自 `prototype/themes.json`，仅加载状态为 `ready` 的主题。
 - 每 400ms 检查桌面图标位置，有变化才通知主题页面。
-- 前台窗口最大化或全屏时暂停；托盘可手动暂停与继续。
+- 前台窗口最大化或全屏时暂停；壁纸启动不抢占前台，自身、不可见及 cloaked 窗口不会误触发暂停；托盘可手动暂停与继续。设置页按程序版本刷新缓存，缩略图使用内嵌图片和真实 `<img>`。
 - Windows 11 24H2 及以后使用 Progman 分层子窗口；较早系统使用 WorkerW。
 - 当前仅覆盖主显示器；系统壁纸幻灯片或 Windows 聚焦换图时可能短暂闪烁。
 - 设置保存到 `%LOCALAPPDATA%\DesklandPreview\settings.json`，日志为同目录下的 `host.log`。

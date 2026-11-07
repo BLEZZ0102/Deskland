@@ -1246,8 +1246,13 @@ function startHostedMode() {
   commit(true);                                   // 先是一片海
   syncBirds(false);
   let first = true;
+  const settlePaused = () => {
+    if (!paused || !iconsSeen) return;
+    curMix = 1; morphT0 = -1e9;                  // 暂停只冻结动画，首次地形和图标布局仍要完成
+    draw(performance.now());
+  };
   const handle = m => {
-    if (m.t === 'pause') { paused = PREVIEW ? false : m.v; return; }
+    if (m.t === 'pause') { paused = PREVIEW ? false : m.v; settlePaused(); return; }
     if (m.t === 'settings') { applySettings(m.v || {}); return; }
     if (m.t === 'reset') { applySettings(Object.assign({}, DEFAULTS, m.v || {})); return; }
     if (m.t !== 'icons') return;
@@ -1257,6 +1262,7 @@ function startHostedMode() {
     iconsSeen = true;
     commit(first);                                // 第一次：陆地从海里"长"出来；之后：岸线平滑移动
     if (first) { curMix = 1; kayaks.length = 0; syncKayaks(); curMix = 0; first = false; }
+    settlePaused();
   };
   if (PREVIEW) {
     addEventListener('message', ev => { if (ev.source === parent) handle(typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data); });

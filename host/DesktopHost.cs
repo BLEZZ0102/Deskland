@@ -956,7 +956,9 @@ class SettingsForm : Form
                 try { host.OnSettingsMessage(a.TryGetWebMessageAsString()); }
                 catch (Exception ex) { Log.Write("处理设置消息失败：" + ex.Message); }
             };
-            core.Navigate("https://app.local/settings.html");
+            string settingsUrl = "https://app.local/settings.html?v=" + Uri.EscapeDataString(Application.ProductVersion);
+            Log.Write("设置页面：" + settingsUrl);
+            core.Navigate(settingsUrl);
         }
         catch (Exception ex)
         {
@@ -1001,6 +1003,7 @@ class WallpaperForm : Form
     public Func<string> SettingsJson;                   // 页面就绪时先发给它的设置消息
     public event Action<string> IconsChanged;           // 图标变化时转给设置窗口的预览
     public string LastIcons { get { return lastIcons; } }
+    protected override bool ShowWithoutActivation { get { return true; } }
 
     public WallpaperForm(string pageDir, string page, bool manualPause)
     {
@@ -1348,8 +1351,11 @@ class WallpaperForm : Form
     {
         if (web.CoreWebView2 == null) return;
         bool pause = manualPause;
+        string pauseBy = "";
         IntPtr fg = Native.GetForegroundWindow();
-        if (!pause && fg != IntPtr.Zero)
+        int cloaked = 0;
+        if (!pause && fg != IntPtr.Zero && fg != Handle && Native.IsWindowVisible(fg)
+            && (Native.DwmGetWindowAttribute(fg, 14 /* DWMWA_CLOAKED */, out cloaked, 4) != 0 || cloaked == 0))
         {
             var cls = new StringBuilder(64);
             Native.GetClassName(fg, cls, 64);
@@ -1360,14 +1366,14 @@ class WallpaperForm : Form
                 Native.GetWindowRect(fg, out wr);
                 bool covers = wr.Left <= screen.Left && wr.Top <= screen.Top && wr.Right >= screen.Right && wr.Bottom >= screen.Bottom;
                 int cx = (wr.Left + wr.Right) / 2, cy = (wr.Top + wr.Bottom) / 2;
-                if (screen.Contains(cx, cy) && (covers || Native.IsZoomed(fg))) pause = true;
+                if (screen.Contains(cx, cy) && (covers || Native.IsZoomed(fg))) { pause = true; pauseBy = c; }
             }
         }
         int p = pause ? 1 : 0;
         if (p == lastPause) return;
         lastPause = p;
         Post("{\"t\":\"pause\",\"v\":" + (pause ? "true" : "false") + "}");
-        Log.Write(pause ? "暂停（有窗口最大化 / 全屏，或手动暂停）" : "继续播放");
+        Log.Write(pause ? "暂停（有窗口最大化 / 全屏，或手动暂停）" + (pauseBy == "" ? "" : "，前台窗口类 " + pauseBy) : "继续播放");
     }
 
     // ---------------------------------------------------------------- 退出：拆掉窗口，让资源管理器重画原壁纸
@@ -1511,6 +1517,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] public static extern bool RedrawWindow(IntPtr h, IntPtr rect, IntPtr rgn, uint flags);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attribute, out int value, int size);
     [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll")] public static extern IntPtr VirtualAllocEx(IntPtr proc, IntPtr addr, IntPtr size, uint type, uint protect);
