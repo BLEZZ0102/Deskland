@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskland · Nebula</title>
+<!--
+  Deskland · Nebula theme (top-down deep space; WebGL2, drawn every frame)
+  - Icons sit inside dark cavities blown into a glowing emission nebula; the cavity edge is a thin bright rim of swept-up gas
+  - The empty parts of the desktop fill with drifting gas, dust lanes and stars; cavities reshape when icons move
+  License: GPL-3.0, same as Deskland.
+-->
+<link rel="stylesheet" href="astro.css">
+</head>
+<body>
+<canvas id="art"></canvas>
+<div id="desktop"></div>
+<div id="taskbar"><div id="clock"></div></div>
+<div id="demobar"><button data-a="layout">Change layout</button><button data-a="add">+ Icon</button><button data-a="seed">New sky</button></div>
+<div id="nogl">This browser does not support WebGL2.</div>
+<script src="astro-core.js"></script>
+<script>
+'use strict';
+// Palettes: thin haze, cloud layer A, cloud layer B
+const PALETTES = [
+  [[0.10, 0.06, 0.30], [0.92, 0.20, 0.42], [0.16, 0.42, 0.90]],   // Carina: violet haze, rose, blue
+  [[0.03, 0.09, 0.30], [0.05, 0.58, 0.62], [0.95, 0.32, 0.60]],   // Lagoon: blue haze, teal, pink
+  [[0.20, 0.04, 0.09], [0.92, 0.30, 0.07], [1.00, 0.72, 0.30]],   // Ember: wine haze, orange, gold
+];
+const pal = PALETTES[0].map(c => c.slice());
+
+boot({
+  defaults: { sigma: 80, density: 0.6, palette: 0, flow: 1, stars: 0.6 },
+  fs: `
+uniform vec3 uCA, uCB, uCC;
+uniform float uDens, uFlow;
+
+void main() {
+  vec2 p = fragPx();
+  float s = iconField(p);
+
+  // gas: two independent cloud layers (different colours) built from several scales of drifting noise
+  vec2 q = p + vec2(uFlow * 2.6, uFlow * 0.9);
+  vec4 w0 = N(q + vec2(-uFlow * 1.7, uFlow * 1.1), 1500.0);
+  vec2 qw = q + (w0.rg - 0.5) * 170.0;
+  vec4 a = N(qw, 2100.0);
+  vec4 b = N(rot2(0.6) * qw + 311.0, 780.0);
+  vec2 qf = qw + (b.rg - 0.5) * 18.0;
+  vec4 c = N(rot2(-1.1) * qf + 97.0, 300.0);
+  vec4 e = N(rot2(2.3) * qf + 53.0, 120.0);
+  float dA = a.b * 0.50 + b.a * 0.28 + c.r * 0.15 + e.g * 0.07;
+  float dB = a.r * 0.50 + b.b * 0.28 + c.a * 0.15 + e.r * 0.07;
+  float on = ss(0.0, 0.08, uDens);
+  float lo = mix(0.62, 0.09, uDens);
+  float tex = 0.80 + 0.40 * e.b;
+  float wisp = pow(1.0 - abs(2.0 * c.b - 1.0), 3.0);
+
+  // the clearing around icons: a cavity with a wavy edge
+  float sw = s + (b.g - 0.5) * 64.0 + (c.g - 0.5) * 24.0 + (e.a - 0.5) * 8.0;
+  float open = ss(-4.0, 130.0, sw) * on;
+  float gA = pow(ss(lo, lo + 0.62, dA), 1.2) * tex * open;
+  float gB = pow(ss(lo + 0.02, lo + 0.64, dB), 1.2) * tex * open;
+  float g = clamp(max(gA, gB), 0.0, 1.0);
+
+  // dust lanes silhouetted against the glow
+  float dl = ss(0.50, 0.70, N(rot2(2.0) * qf + 700.0, 660.0).g * 0.74 + e.r * 0.26);
+  float dust = dl * 0.78 * ss(0.03, 0.35, g);
+
+  vec3 neb = uCA * (gA + gB) * 0.85
+           + uCB * gA * gA * 2.4
+           + uCC * gB * gB * 2.0
+           + mix(uCB, vec3(1.0, 0.92, 0.82), 0.6) * pow(gA * gB, 1.2) * 4.0
+           + (uCB + uCC) * wisp * g * 0.16;
+  neb *= 1.0 - dust;
+
+  // rim of swept-up gas where the cavity meets the cloud: bright where the cloud is dense, broken elsewhere
+  float rx = sw - 5.0;
+  float presence = (0.10 + 0.90 * ss(lo - 0.18, lo + 0.30, max(dA, dB))) * on;
+  float arc = 0.25 + 0.75 * ss(0.30, 0.66, b.b * 0.6 + c.b * 0.4);
+  float front = exp(-rx * rx / 60.0);
+  float glow = exp(-abs(rx) / (rx > 0.0 ? 46.0 : 12.0));
+  vec3 rimCol = mix(uCB, uCC, a.g) * 0.6 + vec3(0.5, 0.42, 0.36);
+  neb += rimCol * (front * 0.9 + glow * 0.22) * presence * arc;
+
+  vec3 col = vec3(0.010, 0.012, 0.028) + vec3(0.008, 0.012, 0.034) * a.r;
+  // icons sit in a young star cluster: more stars and a faint blue glow inside the cavity
+  float near = ss(70.0, -70.0, s);
+  col += vec3(0.030, 0.055, 0.13) * ss(90.0, -150.0, s) * 0.5;
+  vec3 st = starField(p, 1.6 * near);
+  st *= 1.0 - 0.5 * g;
+  st *= 1.0 - 0.7 * dust;
+  col += neb + st;
+  vec2 uv = p / uRes - 0.5;
+  col *= 1.0 - 0.38 * dot(uv, uv);
+  o = vec4(finish(col), 1.0);
+}`,
+  step(dt) {
+    const target = PALETTES[clamp(Math.round(P.palette), 0, PALETTES.length - 1)], k = 1 - Math.exp(-dt * 2.2);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) pal[i][j] += (target[i][j] - pal[i][j]) * k;
+  },
+  uniforms(U) {
+    gl.uniform3fv(U.uCA, pal[0]); gl.uniform3fv(U.uCB, pal[1]); gl.uniform3fv(U.uCC, pal[2]);
+    gl.uniform1f(U.uDens, P.density);
+    gl.uniform1f(U.uFlow, flowT);
+  },
+});
+</script>
+<script src="share.js"></script>
+</body>
+</html>

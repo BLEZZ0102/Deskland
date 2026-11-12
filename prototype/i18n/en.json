@@ -547,6 +547,314 @@
           "unit": ""
         }
       }
+    },
+    "nebula": {
+      "name": "Nebula",
+      "desc": "Your icons sit in dark cavities blown into a glowing nebula, ringed by bright gas, dust lanes and stars",
+      "groups": [
+        "Around icons",
+        "Nebula",
+        "Stars"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Clearing size",
+          "hint": "How much dark space the nebula leaves around your icons"
+        },
+        "density": {
+          "label": "Nebula density",
+          "hint": "How much gas fills the empty areas; set to 0 to leave only stars"
+        },
+        "palette": {
+          "label": "Palette",
+          "hint": "The colours of the gas",
+          "options": [
+            "Carina",
+            "Lagoon",
+            "Ember"
+          ]
+        },
+        "flow": {
+          "label": "Drift speed",
+          "hint": "How fast the gas drifts and billows"
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        }
+      }
+    },
+    "pillars": {
+      "name": "Pillars",
+      "desc": "A young star cluster lights the emptiest part of your desktop; your icons sit in dust pillars that stretch away from it, rimmed with light",
+      "groups": [
+        "Pillars",
+        "Nebula",
+        "Stars"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Pillar width",
+          "hint": "How thick the dust is around your icons"
+        },
+        "length": {
+          "label": "Pillar length",
+          "hint": "How far the pillars stretch away from the star cluster"
+        },
+        "cliffs": {
+          "label": "Dust cliffs",
+          "hint": "How much dust closes in from the edges of the screen"
+        },
+        "palette": {
+          "label": "Palette",
+          "hint": "The colours of the gas and dust",
+          "options": [
+            "Hubble",
+            "Webb",
+            "Hydrogen"
+          ]
+        },
+        "glow": {
+          "label": "Cluster brightness",
+          "hint": "How strongly the star cluster lights the gas"
+        },
+        "flow": {
+          "label": "Drift speed",
+          "hint": "How fast the gas drifts"
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        }
+      }
+    },
+    "galaxy": {
+      "name": "Galaxy",
+      "desc": "One huge spiral galaxy fills your desktop and its bright core settles into the largest empty area; your icons sit in dark dust lanes between the arms, and the arms curve around them",
+      "groups": [
+        "Galaxy",
+        "Surroundings"
+      ],
+      "params": {
+        "size": {
+          "label": "Galaxy size",
+          "hint": "How close you are; larger fills the whole desktop"
+        },
+        "arms": {
+          "label": "Spiral arms",
+          "hint": "The number of spiral arms",
+          "options": [
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        "dust": {
+          "label": "Dust lanes",
+          "hint": "How dark the dust lanes along the arms are; set to 0 to hide"
+        },
+        "flow": {
+          "label": "Rotation speed",
+          "hint": "How fast the star clouds stream through the arms"
+        },
+        "companions": {
+          "label": "Distant galaxies",
+          "hint": "Tiny background galaxies far from your icons; set to 0 to hide",
+          "unit": ""
+        },
+        "sigma": {
+          "label": "Keep-clear distance",
+          "hint": "How wide the dark dust lanes around your icons are"
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        }
+      }
+    },
+    "nightsky": {
+      "name": "Night Sky",
+      "desc": "The Milky Way arches across the whole sky through the emptiest part of your desktop; where icons cross it they cut dark dust rifts with softly glowing edges, stray icons link into faint constellations of their own, and the horizon dips beneath low icons",
+      "groups": [
+        "Milky Way",
+        "Constellations",
+        "Sky"
+      ],
+      "params": {
+        "mw": {
+          "label": "Milky Way brightness",
+          "hint": "Set to 0 to hide the Milky Way"
+        },
+        "cons": {
+          "label": "Constellations",
+          "hint": "Constellation figures placed in the free areas; off by default",
+          "unit": ""
+        },
+        "names": {
+          "label": "Constellation names",
+          "hint": "The name under each constellation",
+          "options": [
+            "Hide",
+            "Show"
+          ]
+        },
+        "links": {
+          "label": "Icon links",
+          "hint": "Join stray icons with faint star lines into constellations of their own",
+          "options": [
+            "Off",
+            "On"
+          ]
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        },
+        "meteors": {
+          "label": "Shooting stars",
+          "hint": "How often a shooting star appears; set to 0 to turn off"
+        },
+        "horizon": {
+          "label": "Horizon",
+          "hint": "Hills and pines along the bottom; they dip beneath icons that sit low",
+          "options": [
+            "Hide",
+            "Show"
+          ]
+        }
+      }
+    },
+    "zen": {
+      "name": "Zen Garden",
+      "desc": "A dry garden seen from above: your icons are stones on cushions of moss, raked gravel ripples around them in rings and runs on in long straight lines, and leaves drift down with the seasons",
+      "groups": [
+        "Garden",
+        "Raked gravel",
+        "Season"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Moss around icons",
+          "hint": "How large the cushion of moss under your icons is"
+        },
+        "moss": {
+          "label": "Moss",
+          "hint": "How much moss grows: on the islands, in banks along the edges and in little stray clumps"
+        },
+        "spacing": {
+          "label": "Rake spacing",
+          "hint": "The distance between two raked lines"
+        },
+        "rings": {
+          "label": "Rings",
+          "hint": "How many rings are raked around each stone before the long straight lines begin"
+        },
+        "season": {
+          "label": "Season",
+          "hint": "The colour of the moss and what drifts down",
+          "options": [
+            "Spring blossom",
+            "Summer leaves",
+            "Autumn maple",
+            "Winter snow"
+          ]
+        },
+        "light": {
+          "label": "Light",
+          "hint": "Where the light comes from and its colour; the raked grooves follow it",
+          "options": [
+            "Morning",
+            "Noon",
+            "Dusk",
+            "Moonlight"
+          ]
+        },
+        "leaves": {
+          "label": "Drifting",
+          "hint": "How many leaves, petals or snowflakes drift down"
+        }
+      }
+    },
+    "terraces": {
+      "name": "Rice Terraces",
+      "desc": "A bird's-eye watercolour of rice terraces: each group of icons sits on a forested hilltop, terraces ring it along the contours, and the open desktop settles into flooded paddies with mist in the valleys",
+      "groups": [
+        "Terraces",
+        "Weather",
+        "Life"
+      ],
+      "params": {
+        "season": {
+          "label": "Season",
+          "hint": "Flooded mirrors in spring, green rice in summer, or the gold of the harvest",
+          "options": [
+            "Spring mirrors",
+            "Summer green",
+            "Autumn gold"
+          ]
+        },
+        "sigma": {
+          "label": "Hill size",
+          "hint": "How large the hill under your icons is"
+        },
+        "spacing": {
+          "label": "Terrace width",
+          "hint": "Roughly how wide each terrace step is"
+        },
+        "mist": {
+          "label": "Valley mist",
+          "hint": "How much mist drifts through the low ground"
+        },
+        "wind": {
+          "label": "Wind",
+          "hint": "How fast the rice waves, the water shivers and the cloud shadows move"
+        },
+        "life": {
+          "label": "People and birds",
+          "hint": "How many farmers, egrets and other life fill the fields"
+        }
+      }
+    },
+    "desert": {
+      "name": "Desert Caravan",
+      "desc": "Golden dunes seen from above: each icon group is an oasis with palms and water, the dune crests curve around them, and a camel caravan with long shadows wanders between the oases",
+      "groups": [
+        "Oasis",
+        "Dunes",
+        "Time of day",
+        "Caravan"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Oasis size",
+          "hint": "How far the oasis spreads around your icons"
+        },
+        "dunes": {
+          "label": "Dune height",
+          "hint": "How tall the dunes are and how strong their light and shade"
+        },
+        "windDir": {
+          "label": "Wind direction",
+          "hint": "Where the wind blows; the crests and the sun turn with it"
+        },
+        "wind": {
+          "label": "Wind strength",
+          "hint": "How much sand blows off the crests, how sharp the ripples are, how much the palms sway"
+        },
+        "tod": {
+          "label": "Time of day",
+          "hint": "White-gold noon, long sunset shadows, or a moonlit night with lanterns",
+          "options": [
+            "Noon",
+            "Sunset",
+            "Moonlit night"
+          ]
+        },
+        "caravan": {
+          "label": "Camels",
+          "hint": "How many camels walk in the caravan"
+        }
+      }
     }
   }
 }

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskland · Zen Garden</title>
+<!--
+  Deskland · Zen Garden theme (karesansui seen from above; WebGL2)
+  - Every icon (or group of icons) is a weathered stone sitting on a cushion of dark moss, so white labels stay readable
+  - Raked gravel ripples in rings along the isolines of the icon field, then runs on as long straight lines across the open space
+  - Moss banks creep in from the garden edges; the gravel re-rakes itself when icons move
+  - The garden is drawn into a cached layer whenever the layout or settings change; every frame only adds drifting
+    cloud shadows and the sprite layer (falling maple leaves, cherry petals or snow) on top
+  License: GPL-3.0, same as Deskland.
+-->
+<link rel="stylesheet" href="astro.css">
+</head>
+<body>
+<canvas id="art"></canvas>
+<div id="desktop"></div>
+<div id="taskbar"><div id="clock"></div></div>
+<div id="demobar"><button data-a="layout">Change layout</button><button data-a="add">+ Icon</button><button data-a="seed">New garden</button></div>
+<div id="nogl">This browser does not support WebGL2.</div>
+<script src="astro-core.js"></script>
+<script src="sprites.js"></script>
+<script src="zen-garden.js"></script>
+<script src="share.js"></script>
+</body>
+</html>
