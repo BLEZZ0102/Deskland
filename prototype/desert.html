@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskland · Desert Caravan</title>
+<!--
+  Deskland · Desert Caravan theme (bird's-eye sand sea, gouache; WebGL2)
+  - Every icon group is an oasis: damp dark earth, palm canopy and a little turquoise water, so white labels stay readable
+  - The dune field flows around the oases: crest lines come from a wind "potential" solved around the icons (they act like
+    conductors in a field), so crests wrap the oases and straighten out far from them; sharp lit windward / violet slip faces,
+    fine wind ripples, sand blowing off the crests
+  - The terrain is baked into a cached texture only when icons, settings or the canvas size change; each frame only adds
+    the moving parts (blowing sand, heat shimmer, glints) and the sprites (caravan with long shadows, palms, a hawk)
+  License: GPL-3.0, same as Deskland.
+-->
+<link rel="stylesheet" href="astro.css">
+</head>
+<body>
+<canvas id="art"></canvas>
+<div id="desktop"></div>
+<div id="taskbar"><div id="clock"></div></div>
+<div id="demobar"><button data-a="layout">Change layout</button><button data-a="add">+ Icon</button><button data-a="seed">New dunes</button></div>
+<div id="nogl">This browser does not support WebGL2.</div>
+<script>if (location.search.includes('dbg')) { const oe = console.error; console.error = (...a) => { oe(...a); const d = document.createElement('pre'); d.style.cssText = 'position:fixed;left:0;top:0;z-index:99;color:#f44;background:#000;font-size:11px;white-space:pre-wrap'; d.textContent = a.join(' '); document.body.appendChild(d); }; addEventListener('error', e => console.error(e.message)); }</script>
+<script src="astro-core.js"></script>
+<script src="sprites.js"></script>
+<script src="desert-caravan.js"></script>
+<script>
+'use strict';
+if (QS.has('seed')) seed = +QS.get('seed');
+/* ---------- times of day (all colours in display space) ---------- */
+// ramp: deep shadow, shadow, mid, lit, highlight; flat = light value of flat sand, gain = how strongly slopes change it
+const TODS = [
+  { name: 'noon', el: 58, ramp: [[0.50, 0.42, 0.58], [0.70, 0.58, 0.64], [0.93, 0.76, 0.52], [0.99, 0.88, 0.66], [1.00, 0.96, 0.84]],
+    flat: 0.70, gain: 2.2, shL: 0.0, damp: [0.80, 0.64, 0.50], earth: [0.24, 0.19, 0.12], vegD: [0.10, 0.25, 0.12], vegL: [0.44, 0.58, 0.20],
+    watD: [0.02, 0.27, 0.36], watL: [0.12, 0.55, 0.56], night: 0, rim: 0.5, shim: 1, sprite: [1.0, 0.98, 0.94], shadow: [0.30, 0.22, 0.38, 0.42] },
+  { name: 'sunset', el: 19, ramp: [[0.40, 0.28, 0.46], [0.62, 0.45, 0.56], [0.89, 0.55, 0.33], [0.99, 0.72, 0.42], [1.00, 0.86, 0.62]],
+    flat: 0.56, gain: 1.5, shL: 1.0, damp: [0.78, 0.66, 0.66], earth: [0.27, 0.19, 0.15], vegD: [0.09, 0.19, 0.11], vegL: [0.46, 0.52, 0.18],
+    watD: [0.03, 0.24, 0.34], watL: [0.20, 0.56, 0.58], night: 0, rim: 1.0, shim: 0, sprite: [1.0, 0.86, 0.70], shadow: [0.22, 0.12, 0.30, 0.55] },
+  { name: 'night', el: 34, ramp: [[0.035, 0.04, 0.10], [0.08, 0.09, 0.19], [0.19, 0.20, 0.33], [0.31, 0.32, 0.45], [0.47, 0.48, 0.60]],
+    flat: 0.52, gain: 1.5, shL: 1.0, damp: [0.72, 0.74, 0.86], earth: [0.04, 0.05, 0.09], vegD: [0.02, 0.06, 0.08], vegL: [0.10, 0.20, 0.20],
+    watD: [0.01, 0.06, 0.14], watL: [0.06, 0.20, 0.30], night: 1, rim: 0.6, shim: 0, sprite: [0.42, 0.50, 0.72], shadow: [0.02, 0.03, 0.10, 0.45] },
+];
+
+/* ---------- wind potential: crests are level lines of u = wind·p + v, solved around the oases ---------- */
+const UC = 12;                       // phase grid cell (CSS px)
+let Ugw = 1, Ugh = 1, uV = null;     // current solution (perturbation v)
+const utex = [null, null];
+let uFrom = 0, uTo = 0, layoutVer = 0;
+function windVec() { const a = P.windDir * Math.PI / 180; return [Math.cos(a), Math.sin(a)]; }
+function allocU() {
+  for (let i = 0; i < 2; i++) {
+    if (utex[i]) gl.deleteTexture(utex[i]);
+    utex[i] = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, utex[i]);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, Ugw, Ugh, 0, gl.RED, gl.FLOAT, new Float32Array(Ugw * Ugh));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, noiseTex);
+}
+function fieldAt(F, x, y) {          // core icon field (STEP grid), bilinear
+  const gx = clamp(x / STEP, 0, Gw - 1.001), gy = clamp(y / STEP, 0, Gh - 1.001), ix = gx | 0, iy = gy | 0, fx = gx - ix, fy = gy - iy, i = iy * Gw + ix;
+  const s = F.s;
+  return (s[i] * (1 - fx) + s[i + 1] * fx) * (1 - fy) + (s[i + Gw] * (1 - fx) + s[i + Gw + 1] * fx) * fy;
+}
+function solvePhase() {
+  const gw = Math.ceil(W / UC) + 2, gh = Math.ceil(H / UC) + 2, n = gw * gh;
+  if (gw !== Ugw || gh !== Ugh || !uV) { Ugw = gw; Ugh = gh; uV = new Float32Array(n); allocU(); }
+  const [wx, wy] = windVec(), sg = P.sigma, K = 14;
+  const c = new Float32Array(n);
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+    const s = FB ? fieldAt(FB, i * UC, j * UC) : 1e3;
+    c[j * gw + i] = 1 + K * sstep(0.25 * sg, -0.55 * sg, s);
+  }
+  const v = uV, dx = wx * UC, dy = wy * UC;
+  const om = 1.86;
+  for (let it = 0; it < 260; it++) {
+    for (let j = 0; j < gh; j++) {
+      const row = j * gw;
+      for (let i = 0; i < gw; i++) {
+        const k = row + i, ck = c[k];
+        let num = 0, den = 0;
+        // right, left, down, up neighbours; a missing neighbour (screen edge) keeps the plain wind flux
+        let cf;
+        if (i < gw - 1) { cf = (ck + c[k + 1]) * 0.5; num += cf * (v[k + 1] + dx); den += cf; } else num += ck * dx;
+        if (i > 0) { cf = (ck + c[k - 1]) * 0.5; num += cf * (v[k - 1] - dx); den += cf; } else num -= ck * dx;
+        if (j < gh - 1) { cf = (ck + c[k + gw]) * 0.5; num += cf * (v[k + gw] + dy); den += cf; } else num += ck * dy;
+        if (j > 0) { cf = (ck + c[k - gw]) * 0.5; num += cf * (v[k - gw] - dy); den += cf; } else num -= ck * dy;
+        v[k] += om * (num / den - v[k]);
+      }
+    }
+  }
+  let m = 0; for (let k = 0; k < n; k++) m += v[k]; m /= n;
+  for (let k = 0; k < n; k++) v[k] -= m;
+  return v;
+}
+function uploadU(i, v) {
+  gl.bindTexture(gl.TEXTURE_2D, utex[i]);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Ugw, Ugh, gl.RED, gl.FLOAT, v);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, noiseTex);
+}
+
+/* ---------- smooth float noise for the dune shapes (8-bit noise steps would show in the slopes) ---------- */
+let hnTex = null;
+function buildHN() {
+  const S = 256, d = new Float32Array(S * S * 4);
+  const lat = (x, y, per, k) => {
+    let h = Math.imul(((x % per) + per) % per, 374761393) ^ Math.imul(((y % per) + per) % per, 668265263) ^ Math.imul(k, 2246822519);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  const vn = (x, y, per, k) => {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+    const a = lat(ix, iy, per, k), b = lat(ix + 1, iy, per, k), c = lat(ix, iy + 1, per, k), e = lat(ix + 1, iy + 1, per, k);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + e) * ux * uy;
+  };
+  const chans = [[3, 6, 12, 24], [4, 8, 16, 32], [3, 6, 12, 24], [5, 10, 20, 40]];
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = x / S, v = y / S, i = (y * S + x) * 4;
+    for (let c = 0; c < 4; c++) {
+      let sm = 0, w = 0.5, tw = 0;
+      for (let o = 0; o < chans[c].length; o++) { const per = chans[c][o]; sm += w * vn(u * per, v * per, per, 907 + c * 61 + o * 17); tw += w; w *= 0.5; }
+      d[i + c] = clamp((sm / tw - 0.5) * 2.0 + 0.5, 0, 1);
+    }
+  }
+  hnTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, hnTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, S, S, 0, gl.RGBA, gl.FLOAT, d);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, noiseTex);
+}
+
+/* ---------- baked terrain (cached texture, redrawn only when something changes) ---------- */
+const BAKE_FS = `
+uniform sampler2D uUA, uUB;
+uniform vec2 uUGrid, uWd;
+uniform float uUC;
+uniform vec4 uSunV;                 // xy: horizontal direction toward the sun, z = sin(elevation), w = cos(elevation)
+uniform vec4 uK;                    // x: dune height (px), y: sigma, z: light of flat sand, w: slope gain
+uniform vec4 uK2;                   // x: cast shadow on/off, y: night, z: ripple strength
+uniform vec3 uC0, uC1, uC2, uC3, uC4, uDamp, uEarth, uVegD, uVegL, uWatD, uWatL;
+layout(location = 1) out vec4 o2;   // masks: water, crest plume, open sand, height
+
+const float CR = 0.75, LAM = 300.0, LAM2 = 92.0, LAMR = 6.5;
+float prof(float t) {               // dune cross-section: long windward slope, sharp brink, steep slip face
+  t = fract(t);
+  float x = t / CR, y = (t - CR) / (1.0 - CR);
+  return t < CR ? x * x * (1.6 - 0.6 * x) : pow(1.0 - y, 1.3);
+}
+vec3 ramp(float L) {
+  L = clamp(L, 0.0, 1.0);
+  vec3 c = mix(uC0, uC1, ss(0.0, 0.32, L));
+  c = mix(c, uC2, ss(0.26, 0.56, L));
+  c = mix(c, uC3, ss(0.52, 0.84, L));
+  return mix(c, uC4, ss(0.82, 1.0, L));
+}
+// cubic B-spline sampling from 4 bilinear taps: the slope of the field is continuous, so no cell facets in the shading
+void bspW(inout vec2 c, out vec2 g0, out vec2 g1, out vec2 h0, out vec2 h1, vec2 size) {   // c: texel space, texel i centred at c = i
+  vec2 f = fract(c); c -= f;
+  vec2 f2 = f * f, f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;
+  g0 = w0 + w1; g1 = w2 + w3;
+  h0 = (c - 1.0 + w1 / g0 + 0.5) / size; h1 = (c + 1.0 + w3 / g1 + 0.5) / size;
+}
+float bsp(sampler2D t, vec2 c, vec2 size) {
+  vec2 g0, g1, h0, h1; bspW(c, g0, g1, h0, h1, size);
+  return g0.y * (g0.x * texture(t, h0).r + g1.x * texture(t, vec2(h1.x, h0.y)).r) + g1.y * (g0.x * texture(t, vec2(h0.x, h1.y)).r + g1.x * texture(t, h1).r);
+}
+vec4 bsp4(sampler2D t, vec2 c, vec2 size) {
+  vec2 g0, g1, h0, h1; bspW(c, g0, g1, h0, h1, size);
+  return g0.y * (g0.x * texture(t, h0) + g1.x * texture(t, vec2(h1.x, h0.y))) + g1.y * (g0.x * texture(t, vec2(h0.x, h1.y)) + g1.x * texture(t, h1));
+}
+uniform sampler2D uHN;
+vec4 HN(vec2 p, float scale) { return bsp4(uHN, (p / scale + uSeed * 1.37) * 256.0 - 0.5, vec2(256.0)); }
+float Ufield(vec2 p) { float b = bsp(uUB, p / uUC, uUGrid); return uMix > 0.999 ? b : mix(bsp(uUA, p / uUC, uUGrid), b, uMix); }
+float fieldS(vec2 p) { float b = bsp(uFB, p / uStep, uGrid); return uMix > 0.999 ? b : mix(bsp(uFA, p / uStep, uGrid), b, uMix); }
+
+// the dune pattern at p: x = main phase, y = small-dune phase, z = height variation 0..1, w = phase coordinate in px
+vec4 dune(vec2 p) {
+  vec4 nA = HN(p, 2300.0), nB = HN(rot2(0.9) * p + 71.0, 870.0);
+  float bw = dot(p, uWd) + Ufield(p) + (nA.r - 0.5) * 400.0 + (nB.g - 0.5) * 110.0;
+  float along = dot(p, vec2(-uWd.y, uWd.x));
+  float phi2 = (bw * 1.0 + (nB.b - 0.5) * 150.0 + along * 0.21) / LAM2;
+  return vec4(bw / LAM, phi2, ss(0.15, 0.85, nA.b * 0.55 + nB.a * 0.45), bw);
+}
+
+void main() {
+  vec2 p = fragPx();
+  float sg = uK.y, pxl = 1.0 / uScale;
+  float s = fieldS(p);
+  vec2 wd = uWd, wn = vec2(-wd.y, wd.x);
+  vec4 nC = N(rot2(-0.6) * p + 13.0, 310.0), nD = N(rot2(2.2) * p + 5.0, 120.0);
+  vec4 nA = N(p, 2300.0), nB = N(rot2(0.9) * p + 71.0, 870.0);          // cheap 8-bit copies for colour only
+  float along = dot(p, wn);
+
+  // ----- dunes -----
+  vec4 D = dune(p);
+  float phi = D.x, phi2 = D.y, bw = D.w;
+  float wob = (nB.r - 0.5) * 0.55 * sg + (nC.g - 0.5) * 0.25 * sg + (nD.a - 0.5) * 0.10 * sg;
+  float sv = s + wob;                                   // wobbly distance to the oasis
+  float near = ss(-0.15 * sg, 1.1 * sg + 40.0, sv);
+  float amp = uK.x * mix(0.35, 1.15, D.z) * near;
+  float amp2 = uK.x * 0.035 * ss(0.35, 0.75, nB.b) * near;
+  float pr = prof(phi), pr2 = prof(phi2);
+  float fx = dFdx(phi), fy = dFdy(phi), fx2 = dFdx(phi2), fy2 = dFdy(phi2);
+  float Hh = amp * pr + amp2 * pr2;
+  // pixel-wide finite differences of the analytic profile = box-filtered slope: crisp brinks without aliasing
+  float hx = amp * (prof(phi + fx) - pr) + amp2 * (prof(phi2 + fx2) - pr2) + pr * dFdx(amp) + pr2 * dFdx(amp2);
+  float hy = amp * (prof(phi + fy) - pr) + amp2 * (prof(phi2 + fy2) - pr2) + pr * dFdy(amp) + pr2 * dFdy(amp2);
+  vec2 g = vec2(hx, -hy) / pxl;                         // dH/dx, dH/dy in CSS px (y down)
+  vec2 gphi = vec2(fx, -fy) / pxl;                      // phase gradient (per CSS px)
+
+  // ----- light -----
+  vec3 n = normalize(vec3(-g, 1.0));
+  vec3 l = vec3(uSunV.xy * uSunV.w, uSunV.z);
+  float ndl = dot(n, l);
+  float L = uK.z + (ndl - uSunV.z) * uK.w;
+  float lit = 1.0;
+  if (uK2.x > 0.5) {                                    // cast shadows: march toward the sun through the dune profile
+    const float DF = 80.0;                              // the pattern is re-evaluated 80 px sunward, so curved crests cast curved shadows
+    vec4 F = dune(p + uSunV.xy * DF);
+    float ampF = uK.x * mix(0.35, 1.15, F.z) * near;
+    float tanE = uSunV.z / uSunV.w, occ = -1.0;
+    for (int k = 1; k <= 10; k++) {
+      float d = float(k * k) * 1.45, u = d / DF;
+      float hq = mix(amp, ampF, min(u, 1.5)) * prof(mix(phi, F.x, u));
+      occ = max(occ, (hq - amp * pr - d * tanE) / (1.0 + d * 0.035));
+    }
+    lit = 1.0 - ss(-0.2, 1.4, occ);
+  }
+  L = mix(min(L, uK.z * 0.36), L, lit);
+  // gouache: soft strokes that follow the crest lines
+  float br = N(vec2(along * 0.20, bw) + 19.0, 150.0).g;
+  float br2 = N(vec2(along * 0.35, bw) * 1.7 + 331.0, 90.0).b;
+  // slip faces are not flat bands: lighter toward their foot (light bounced off the next dune), and more brushwork in the shade
+  float lee = fract(phi) - CR;
+  float shade = 1.0 - ss(0.25, 0.55, L);
+  L += lee > 0.0 ? ss(0.0, 1.0 - CR, lee) * 0.16 * ss(0.2, 0.8, amp / (uK.x + 1.0)) : 0.0;
+  L += (br - 0.5) * (0.05 + 0.10 * shade) + (br2 - 0.5) * (0.02 + 0.06 * shade) + (nC.g - 0.5) * 0.05 * shade;
+  vec3 col = ramp(L);
+  // a painter's light line along each brink, on the windward side
+  float tc = fract(phi) - CR, fwc = length(vec2(fx, fy)) + 0.001;
+  float rim = ss(-0.045 - fwc, -0.006, tc) * ss(fwc * 0.5, -fwc * 0.5, tc) * ss(0.3, 0.8, amp / (uK.x + 1.0)) * lit;
+  col = mix(col, uC4, rim * 0.45 * uK2.w);
+
+  // ----- wind ripples: their own fine shading, faded out (box filter) before they get finer than a pixel -----
+  float tt = fract(phi);
+  float fw1 = length(vec2(fx, fy)) + 0.002;
+  float windward = ss(0.0, 0.10, tt) * ss(CR + fw1, CR - 0.05, tt);
+  float rho = (dot(p, wd) * 0.55 + bw * 0.45 + (nD.r - 0.5) * 9.0 + (nC.r - 0.5) * 22.0) / LAMR;
+  float rf = length(wd * 0.55 + gphi * LAM * 0.45) / LAMR / uScale;   // ripple cycles per pixel
+  float att = clamp(sin(3.14159 * rf) / (3.14159 * rf + 1e-5), 0.0, 1.0) * ss(0.7, 0.35, rf);
+  float rs = uK2.z * att * (0.2 + 0.8 * windward) * ss(0.0, 0.7 * sg + 30.0, sv) * mix(0.3, 1.0, ss(0.3, 0.7, nB.b)) * lit;
+  float rph = 6.28318 * rho;
+  float facing = dot(normalize(gphi + 1e-6), uSunV.xy) * uSunV.w;
+  col *= 1.0 + 0.075 * rs * (sin(rph) + 0.3 * sin(2.0 * rph + 1.3)) * (0.4 + 0.6 * abs(facing));
+
+  // sand colour drifts a little across the sea; interdune flats are a touch pinker
+  col *= mix(vec3(1.03, 0.98, 0.93), vec3(0.97, 1.0, 1.03), nA.g);
+  float hrel = Hh / (uK.x + 1.0);
+  col *= mix(vec3(0.95, 0.92, 0.95), vec3(1.0), ss(0.0, 0.35, hrel) * 0.8 + 0.2 * (1.0 - near));
+  float grain = N(p, 300.0).b;
+  col *= 0.97 + 0.06 * grain;
+
+  // ----- oasis -----
+  float sandness = 1.0;
+  float damp = ss(0.30 * sg + 14.0, -0.05 * sg, sv);
+  col = mix(col, col * uDamp, damp * 0.6);
+  float vegN = nD.g * 0.6 + nC.b * 0.4;
+  float veg = ss(0.04 * sg, -0.26 * sg, sv + (vegN - 0.5) * 0.30 * sg);
+  // earth, then gouache dabs of green that close up toward the middle
+  float depth = ss(-0.05 * sg, -0.8 * sg, sv);
+  vec3 earth = mix(col * uDamp * 0.8, uEarth * (0.85 + 0.3 * nC.r) * (0.9 + 0.2 * grain), ss(0.0, 0.45, depth));   // bare ground: damp sand at the rim, dark earth inside
+  vec4 dabN = N(rot2(0.4) * p + 140.0, 150.0), dabM = N(rot2(-1.2) * p + 40.0, 64.0);
+  float dv = dabN.r * 0.65 + dabM.g * 0.35;
+  float th = mix(0.60, 0.18, depth);
+  float dab = ss(th, th + 0.05, dv);
+  float dvL = N(rot2(0.4) * (p - uSunV.xy * 3.0) + 140.0, 150.0).r * 0.65 + N(rot2(-1.2) * (p - uSunV.xy * 3.0) + 40.0, 64.0).g * 0.35;
+  float lift = clamp(0.45 + (dv - dvL) * 7.0, 0.0, 1.0);                  // each clump lit on its sunny side
+  float inner = ss(th + 0.03, th + 0.22, dv);                              // and darker in its heart
+  vec3 vcol = mix(uVegD, uVegL, lift * (0.75 + 0.25 * dabM.b));
+  vcol = mix(vcol, uVegD * 0.8, inner * 0.35);
+  vec3 ground = mix(earth, vcol, dab);
+  // sparse tufts of dry grass on the damp ring
+  float tuft = ss(0.74, 0.78, N(p, 37.0).g) * ss(0.30 * sg, 0.0, sv) * (1.0 - veg);
+  col = mix(col, mix(uVegD, uVegL, 0.6) * 0.9, tuft * 0.7);
+  col = mix(col, ground, veg);
+  sandness = 1.0 - veg;
+  // water: a pool in the deepest part of some oases
+  float pn = HN(rot2(2.7) * p + 61.0, 900.0).g * 0.8 + nC.r * 0.06 + nD.b * 0.04 + 0.05;
+  float wv = (pn - 0.29) * 2.4 * sg + (1.0 - depth) * 0.7 * sg;          // < 0: water
+  float wmask = ss(0.5, 0.9, depth);
+  float water = ss(1.5, -1.5, wv) * wmask;
+  float wdeep = ss(0.0, -0.30 * sg, wv);
+  vec3 wcol = mix(uWatL, uWatD, wdeep);
+  wcol = mix(wcol, uWatL * 1.3 + 0.08, exp(-abs(wv + 2.5) / 1.8) * 0.7);    // bright shallow rim
+  float bank = ss(0.12 * sg, 1.0, wv) * (1.0 - water) * wmask;             // wet dark bank and reeds round the pool
+  col = mix(col, mix(uEarth, uVegD, 0.5), bank * 0.75);
+  col = mix(col, wcol, water);
+
+  // ----- masks for the animated pass -----
+  float plume = ss(CR - 0.03, CR + fw1, tt) * exp(-max(tt - CR, 0.0) / 0.07) * ss(0.25, 0.9, amp / (uK.x + 1.0));
+  o = vec4(col, 1.0);
+  o2 = vec4(water, plume * sandness, sandness, hrel);
+}`;
+
+const SHOW_FS = `
+uniform sampler2D uCol, uMsk, uPrev;
+uniform float uFade, uShim, uNightF, uWindS, uWT;
+uniform vec2 uWd;
+void main() {
+  vec2 p = fragPx();
+  vec2 uv = gl_FragCoord.xy / (uRes * uScale);
+  if (uShim > 0.0) {                                    // heat shimmer: a faint wobble of the hot sand
+    vec4 hn = N(vec2(p.x, p.y * 2.6 - uTime * 22.0), 260.0);
+    uv += (hn.rg - 0.5) * uShim * 1.4 / uRes;
+  }
+  vec4 m = texture(uMsk, uv);
+  vec3 d = mix(texture(uPrev, uv).rgb, texture(uCol, uv).rgb, uFade);
+  vec3 col = -log(max(1.0 - d, vec3(1e-3))) / 1.35;
+  // sand blowing off the crests, streaming downwind
+  vec2 wd = uWd, q = vec2(dot(p, wd), dot(p, vec2(-wd.y, wd.x)));
+  float sa = N(vec2(q.x * 0.11 - uWT * 3.2, q.y * 0.9), 70.0).r;
+  float sb = N(vec2(q.x * 0.05 - uWT * 2.1, q.y * 0.5) + 0.37, 90.0).g;
+  float streak = ss(0.5, 0.9, sa * 0.6 + sb * 0.4) * m.g * uWindS;
+  col += vec3(1.0, 0.86, 0.66) * streak * mix(0.32, 0.14, uNightF);
+  // glints on the water
+  vec2 gc = floor(p / 3.0);
+  float gh = h21(gc + floor(uTime * 2.0 + h21(gc) * 7.0));
+  col += vec3(1.0, 0.95, 0.85) * m.r * ss(0.985, 1.0, gh) * (1.0 - uNightF) * 0.9;
+  if (uNightF > 0.0) {
+    vec3 st = starField(p, 0.0);
+    col += st * uNightF * (m.r * 0.9 + m.b * 0.10);
+  }
+  o = vec4(finish(col), 1.0);
+}`;
+
+let BK = null, lastLen = 7;                       // bake program
+const bake = { fbo: null, col: [null, null], msk: null, w: 0, h: 0, cur: 0, key: '', fadeT0: -1e9 };
+function mkTex(w, h) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function allocBake() {
+  for (const t of [bake.col[0], bake.col[1], bake.msk]) if (t) gl.deleteTexture(t);
+  bake.w = cv.width; bake.h = cv.height;
+  bake.col = [mkTex(bake.w, bake.h), mkTex(bake.w, bake.h)]; bake.msk = mkTex(bake.w, bake.h);
+  if (!bake.fbo) bake.fbo = gl.createFramebuffer();
+  bake.key = ''; bake.fadeT0 = -1e9;
+}
+const TODV = { ramp: TODS[1].ramp.map(c => c.slice()) };
+function todNow() { return TODS[clamp(Math.round(P.tod), 0, TODS.length - 1)]; }
+function sunVec(t) {
+  // the sun stands a little to the side of the upwind direction, so windward faces are lit and slip faces fall in shade
+  const [wx, wy] = windVec(), a = Math.atan2(-wy, -wx) + 0.42, e = t.el * Math.PI / 180;
+  return [Math.cos(a), Math.sin(a), Math.sin(e), Math.cos(e)];
+}
+function doBake(now) {
+  const sized = cv.width !== bake.w || cv.height !== bake.h;
+  if (sized) allocBake();
+  const t = todNow();
+  const geomKey = [P.tod, P.dunes, P.wind, P.windDir, P.sigma, seed, cv.width, cv.height].join(',');
+  const key = geomKey + ',' + curMix.toFixed(4) + ',' + fromI + toI;
+  if (key === bake.key) return;
+  const continuous = bake.key && bake.key.startsWith(geomKey + ',');     // only the icon morph moved on
+  if (!continuous && bake.key && !sized) { bake.cur = 1 - bake.cur; bake.fadeT0 = performance.now(); }  // a sudden change: cross-fade from the old picture
+  bake.key = key;
+  const tb = performance.now();
+  const U = BK.U;
+  gl.useProgram(BK.p);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, bake.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, bake.col[bake.cur], 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, bake.msk, 0);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  gl.viewport(0, 0, bake.w, bake.h);
+  gl.uniform1i(U.uNoise, 0); gl.uniform1i(U.uFA, 1); gl.uniform1i(U.uFB, 2);
+  gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, utex[uFrom]);
+  gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, utex[uTo]);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, hnTex); gl.activeTexture(gl.TEXTURE0);
+  gl.uniform1i(U.uUA, 4); gl.uniform1i(U.uUB, 5); gl.uniform1i(U.uHN, 6);
+  gl.uniform2f(U.uRes, cv.width / cv._scale, cv.height / cv._scale);
+  gl.uniform2f(U.uGrid, Gw, Gh);
+  gl.uniform1f(U.uScale, cv._scale);
+  gl.uniform1f(U.uStep, STEP);
+  gl.uniform1f(U.uMix, curMix);
+  gl.uniform1f(U.uSeed, (seed % 997) / 997);
+  gl.uniform2f(U.uUGrid, Ugw, Ugh);
+  gl.uniform1f(U.uUC, UC);
+  const [wx, wy] = windVec();
+  gl.uniform2f(U.uWd, wx, wy);
+  gl.uniform4fv(U.uSunV, sunVec(t));
+  gl.uniform4f(U.uK, 8 + 44 * P.dunes, P.sigma, t.flat, t.gain * (0.6 + 0.6 * P.dunes));
+  gl.uniform4f(U.uK2, t.shL, t.night, 0.5 + 0.9 * P.wind, t.rim);
+  const r = t.ramp;
+  gl.uniform3fv(U.uC0, r[0]); gl.uniform3fv(U.uC1, r[1]); gl.uniform3fv(U.uC2, r[2]); gl.uniform3fv(U.uC3, r[3]); gl.uniform3fv(U.uC4, r[4]);
+  gl.uniform3fv(U.uDamp, t.damp); gl.uniform3fv(U.uEarth, t.earth); gl.uniform3fv(U.uVegD, t.vegD); gl.uniform3fv(U.uVegL, t.vegL);
+  gl.uniform3fv(U.uWatD, t.watD); gl.uniform3fv(U.uWatL, t.watL);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+  if (QS.has('dbg')) { const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); bake.ms = performance.now() - tb; bake.n = (bake.n || 0) + 1; }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.useProgram(PR.p);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+
+boot({
+  defaults: { sigma: 70, tod: 1, dunes: 0.6, windDir: 35, wind: 0.5, caravan: 7, stars: 0.7, flow: 1 },
+  layoutKeys: ['windDir'],
+  fs: SHOW_FS,
+  init() {
+    buildHN();
+    BK = program(FS_HEAD.replace('out vec4 o;', 'layout(location = 0) out vec4 o;') + BAKE_FS);
+    Caravan.init({ tod: todNow, sun: () => sunVec(todNow()) });
+  },
+  onSeed() { Caravan.reseed(); },
+  onLayout(fromEmpty) {
+    const morphing = performance.now() - morphT0 < 200;
+    const v = solvePhase();
+    if (morphing) { uFrom = uTo; uTo = 1 - uTo; uploadU(uTo, v); if (fromEmpty) { const z = new Float32Array(Ugw * Ugh); uploadU(uFrom, z); } }
+    else { uploadU(uTo, v); uFrom = uTo; }
+    layoutVer++;
+    Caravan.layout(fromEmpty);
+  },
+  step(dt, now) {
+    if (P.caravan !== lastLen) { lastLen = P.caravan; Caravan.setLength(); }
+    Caravan.step(dt, now);
+  },
+  uniforms(U, now) {
+    doBake(now);
+    const t = todNow(), [wx, wy] = windVec();
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, bake.col[bake.cur]);
+    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, bake.msk);
+    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, bake.col[1 - bake.cur]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U.uCol, 4); gl.uniform1i(U.uMsk, 5); gl.uniform1i(U.uPrev, 6);
+    const f = clamp((performance.now() - bake.fadeT0) / 900, 0, 1);
+    gl.uniform1f(U.uFade, f * f * (3 - 2 * f));
+    gl.uniform1f(U.uShim, t.shim);
+    gl.uniform1f(U.uNightF, t.night);
+    gl.uniform1f(U.uWindS, 0.25 + 1.1 * P.wind);
+    gl.uniform1f(U.uWT, flowT * (0.4 + 1.4 * P.wind));
+    gl.uniform2f(U.uWd, wx, wy);
+  },
+  after(now) { Caravan.draw(now); },
+});
+// debug / test hooks: ?layout=0|1|2, ?set=tod:2,dunes:0.8
+if (QS.has('layout')) setTimeout(() => { const k = +QS.get('layout'); if (k === 9) { icons.forEach(ic => ic.el.remove()); icons = []; commit(true); } else demoApply(k); }, 0);
+if (QS.has('dbg')) setTimeout(() => { const d = Caravan.debug(); const e = document.createElement('pre'); e.style.cssText = 'position:fixed;right:0;top:0;z-index:99;color:#fff;background:#000a;font-size:11px'; e.textContent = JSON.stringify({ bakeMs: bake.ms | 0, bakes: bake.n, frame: __dbg.bench(), T: d.T.toFixed(2), palms: d.palms, lead: d.lead | 0, len: d.route && d.route.len | 0, icons: icons.length, fb: !!FB }); document.body.appendChild(e); }, 3000);
+if (QS.has('set')) setTimeout(() => {
+  const v = {}; for (const kv of QS.get('set').split(',')) { const [k, x] = kv.split(':'); v[k] = +x; }
+  applySettings(v);
+}, 0);
+</script>
+<script src="share.js"></script>
+</body>
+</html>

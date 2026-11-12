@@ -312,10 +312,11 @@ function resize() {
   allocField();
 }
 const T0 = performance.now();
-let lastT = 0, fpsEMA = 0, frameN = 0, frameMs = 0, appear = 0, flowT = 0;
+let lastT = 0, fpsEMA = 0, frameN = 0, frameMs = 0, appear = QS.has('nofade') ? 1 : 0, flowT = 0;   // ?nofade: skip the fade-in (test screenshots)
 let paused = false;                                 // host: a window is maximized / full screen
-function frame(now) {
+function frame() {
   requestAnimationFrame(frame);
+  const now = performance.now();                    // same clock as morphT0 (the rAF timestamp can differ, e.g. headless virtual time)
   if (paused) { lastT = 0; return; }
   if (P.cap30 && now - lastT < 31) return;
   const dt = lastT ? Math.min((now - lastT) / 1000, 0.1) : 0.033;
@@ -348,6 +349,7 @@ function draw(now) {
   gl.uniform1f(U.uAppear, appear * appear * (3 - 2 * appear));
   if (THEME.uniforms) THEME.uniforms(U, now);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+  if (THEME.after) THEME.after(now);                // optional extra layers on the same canvas (sprites.js), so shares include them
 }
 
 /* ---------- settings ---------- */

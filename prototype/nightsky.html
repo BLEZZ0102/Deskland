@@ -6,8 +6,10 @@
 <title>Deskland · Night Sky</title>
 <!--
   Deskland · Night Sky theme (looking up from the ground; WebGL2 + a 2D overlay for the star charts)
-  - The Milky Way runs through the emptiest corridor of the desktop
-  - Constellations settle into the free areas, sized to fit; stray icons are joined into a constellation of their own
+  - The Milky Way arches across the whole sky along the emptiest corridor; where icons cross it they cut dark dust rifts
+    into it with softly glowing edges, stretched along the band like the Great Rift
+  - Stray icons are joined into a faint constellation of their own; optional constellation figures settle into free areas
+  - The hills and pines along the bottom dip and part under icons that sit low on the screen
   License: GPL-3.0, same as Deskland.
 -->
 <link rel="stylesheet" href="astro.css">
@@ -49,7 +51,7 @@ for (const f of FIGURES) {                                   // centre each figu
 const TINTS = ['255,255,255', '255,206,160', '178,206,255'];
 const HORIZON = 150;                                         // height of the silhouette above the taskbar
 
-const mw = { x: 0, y: 0, ang: -0.7, core: 0, tx: 0, ty: 0, tang: -0.7, tcore: 0, set: false };
+const mw = { x: 0, y: 0, ang: -0.7, core: 0, curve: 0, tx: 0, ty: 0, tang: -0.7, tcore: 0, tcurve: 0, set: false };
 let cons = [], order = [], links = [], linkA = 0, hz = 1;
 let meteor = null, nextMeteor = 4;
 const ov = document.createElement('canvas'), octx = ov.getContext('2d');
@@ -59,20 +61,21 @@ function shuffleFigures() {
   const rnd = mulberry32(seed + 5), sh = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   order = sh(FIGURES.filter(f => f.big)).concat(sh(FIGURES.filter(f => !f.big)));
 }
-const mwWidth = () => 46 + 0.105 * Math.min(W, H);
+const mwWidth = () => 58 + 0.12 * Math.min(W, H);
+const CURVES = [-0.34, 0, 0.34];
 
-// The Milky Way takes the emptiest straight corridor across the desktop
+// The Milky Way takes the emptiest gently curved corridor across the desktop
 function routeMilkyWay(fromEmpty) {
   const rnd = mulberry32(seed + 11), diag = Math.hypot(W, H), D = 240, cx = W / 2, cy = (H - TASKBAR) / 2;
-  const flip = rnd() < 0.5 ? 1 : -1, tilt = rnd();
+  const flip = rnd() < 0.5 ? 1 : -1, tilt = rnd(), bend = rnd() < 0.7 ? 1 : 0;
   const floor = H - TASKBAR - (P.horizon ? HORIZON * 0.8 : 0);     // what sinks behind the hills does not count
   let best = -1e9, bt = null;
-  for (const deg of [26, 34, 42, 50, 58, 66]) for (const sign of [1, -1]) for (let u = -0.24; u <= 0.241; u += 0.06) {
-    const a = sign * deg * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
-    const ox = cx - dy * u * diag, oy = cy + dx * u * diag;
+  for (const deg of [22, 30, 38, 46, 54, 62]) for (const sign of [1, -1]) for (const cu of CURVES) for (let u = -0.24; u <= 0.241; u += 0.06) {
+    const a = sign * deg * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a), nx = -dy, ny = dx;
+    const ox = cx + nx * u * diag, oy = cy + ny * u * diag;
     let acc = 0, n = 0, bestC = -1, coreT = 0, run = 0;
     for (let t = -diag / 2; t <= diag / 2; t += 40) {
-      const x = ox + dx * t, y = oy + dy * t;
+      const off = cu * t * t / diag, x = ox + dx * t + nx * off, y = oy + dy * t + ny * off;
       if (x < 0 || x > W || y < 0 || y > floor) continue;
       const c = Math.min(iconDist(x, y), D) / D;
       acc += c; n++;
@@ -81,17 +84,23 @@ function routeMilkyWay(fromEmpty) {
       if (centred > bestC) { bestC = centred; coreT = t - 50; }
     }
     if (n < 8) continue;
-    let sc = acc / n * (0.55 + 0.45 * Math.min(1, n * 40 / (0.8 * diag))) - Math.abs(u) * 0.45;
+    let sc = acc / n * (0.55 + 0.45 * Math.min(1, n * 40 / (0.8 * diag))) - Math.abs(u) * 1.1;   // a band across the middle of the sky, crossing icons if it must
     sc += 0.03 * (sign === flip ? 1 : 0) - 0.02 * Math.abs(deg - (30 + 30 * tilt)) / 30;       // the seed's taste on an empty desktop
-    if (mw.set && Math.abs(a - mw.tang) < 1e-3 && Math.hypot(ox - mw.tx, oy - mw.ty) < 1) sc += 0.04;
-    if (sc > best) { best = sc; bt = { x: ox, y: oy, a, core: coreT }; }
+    // an arch that bulges upward reads best; the seed decides whether a straight band is preferred
+    const up = cu === 0 ? 0 : (ny * cu < 0 ? 1 : -1);
+    sc += bend ? 0.025 * up : -0.012 * Math.abs(cu) / 0.34;
+    if (mw.set && Math.abs(a - mw.tang) < 1e-3 && Math.abs(cu - mw.tcurve) < 1e-3 && Math.hypot(ox - mw.tx, oy - mw.ty) < 1) sc += 0.04;
+    if (sc > best) { best = sc; bt = { x: ox, y: oy, a, core: coreT, curve: cu }; }
   }
-  if (!bt) bt = { x: cx, y: cy, a: -0.7 * flip, core: 0 };
-  mw.tx = bt.x; mw.ty = bt.y; mw.tcore = bt.core;
-  let da = (bt.a - mw.ang) % Math.PI; if (da > Math.PI / 2) da -= Math.PI; if (da < -Math.PI / 2) da += Math.PI;
+  if (!bt) bt = { x: cx, y: cy, a: -0.7 * flip, core: 0, curve: 0 };
+  mw.tx = bt.x; mw.ty = bt.y; mw.tcore = bt.core; mw.tcurve = bt.curve;
   mw.tang = bt.a;
-  if (!mw.set || fromEmpty) { mw.x = mw.tx; mw.y = mw.ty; mw.ang = mw.tang; mw.core = mw.tcore; mw.set = true; }
-  else mw.ang = mw.tang - da;                                 // continue from the equivalent angle, the short way round
+  if (!mw.set || fromEmpty) { mw.x = mw.tx; mw.y = mw.ty; mw.ang = mw.tang; mw.core = mw.tcore; mw.curve = mw.tcurve; mw.set = true; }
+  else {
+    // continue from the equivalent pose the short way round (turning by half a circle flips the sign of the curvature)
+    let da = (bt.a - mw.ang) % (2 * Math.PI); if (da > Math.PI) da -= 2 * Math.PI; if (da < -Math.PI) da += 2 * Math.PI;
+    if (Math.abs(da) > Math.PI / 2) { mw.ang += da > 0 ? Math.PI : -Math.PI; mw.curve = -mw.curve; mw.core = -mw.core; }
+  }
 }
 
 // Constellations settle into the largest free areas of the sky, sized to fit
@@ -99,7 +108,8 @@ function placeConstellations(fromEmpty) {
   const want = clamp(Math.round(P.cons), 0, 6);
   const bottom = TASKBAR + (P.horizon ? HORIZON * 0.75 : 0);
   // keep clear of the bright core of the Milky Way, where the figures would be hard to read
-  const core = P.mw > 0.15 ? [{ x: mw.tx + Math.cos(mw.tang) * mw.tcore, y: mw.ty + Math.sin(mw.tang) * mw.tcore, r: mwWidth() * 1.1 }] : [];
+  const ca = Math.cos(mw.tang), sa = Math.sin(mw.tang), off = mw.tcurve * mw.tcore * mw.tcore / Math.hypot(W, H);
+  const core = P.mw > 0.15 ? [{ x: mw.tx + ca * mw.tcore - sa * off, y: mw.ty + sa * mw.tcore + ca * off, r: mwWidth() * 1.1 }] : [];
   const spots = want ? freeSpots(want, { top: 8, bottom, edge: 1.0, pad: 26, minR: 74, sep: 1.12, blocked: core, prefer: { x: W * 0.5, y: H * 0.36 } }) : [];
   for (const c of cons) c.used = false;
   for (const s of spots) {
@@ -148,6 +158,40 @@ function linkIcons() {
   }
 }
 
+// The horizon keeps below icons that sit low on the screen: a ceiling (height above the bottom edge, CSS px) per column
+const HC = 4;
+let hcN = 1, hcTex = null, hcCur = null, hcTgt = null, hcMoving = true;
+function buildCeiling() {
+  const n = Math.ceil(W / HC) + 2;
+  if (!hcCur || hcCur.length !== n) {
+    hcN = n; hcCur = new Float32Array(n).fill(4000); hcTgt = new Float32Array(n);
+    gl.bindTexture(gl.TEXTURE_2D, hcTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, n, 1, 0, gl.RED, gl.FLOAT, null);
+  }
+  hcTgt.fill(4000);
+  for (const ic of activeIcons()) {
+    const lift = H - (ic.y + ic.h) - 10;                     // room under this icon
+    if (lift > TASKBAR + 420) continue;
+    const cx = ic.x + ic.w / 2, hw = ic.w / 2 - 6;
+    for (let i = 0; i < n; i++) {
+      const d = Math.max(0, Math.abs(i * HC - cx) - hw);
+      const c = lift + d * d / 520 + d * 0.12;               // a smooth dip with gentle slopes on both sides
+      if (c < hcTgt[i]) hcTgt[i] = c;
+    }
+  }
+  for (let i = 0; i < n; i++) hcTgt[i] = Math.max(hcTgt[i], TASKBAR + 2);
+  hcMoving = true;
+}
+function updateCeiling(dt) {
+  const k = dt < 0 ? 1 : 1 - Math.exp(-dt * 2.6);
+  let change = 0;
+  for (let i = 0; i < hcN; i++) { const d = (hcTgt[i] - hcCur[i]) * k; hcCur[i] += d; change = Math.max(change, Math.abs(d)); }
+  gl.bindTexture(gl.TEXTURE_2D, hcTex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, hcN, 1, gl.RED, gl.FLOAT, hcCur);
+  return change > 0.05;
+}
+
 function drawStar(x, y, mag, tint, a) {
   const r = [0, 2.9, 2.2, 1.6][mag], gr = r * 6;
   const g = octx.createRadialGradient(x, y, 0, x, y, gr);
@@ -178,8 +222,9 @@ function renderOverlay() {
     }
     octx.stroke();
     c.fig.stars.forEach((s, i) => drawStar(pts[i][0], pts[i][1], s[2], s[3], a));
-    if (P.names && c.s > 60) {
-      const yb = Math.max(...pts.map(q => q[1])), xm = (Math.min(...pts.map(q => q[0])) + Math.max(...pts.map(q => q[0]))) / 2;
+    const yb = Math.max(...pts.map(q => q[1])), xm = (Math.min(...pts.map(q => q[0])) + Math.max(...pts.map(q => q[0]))) / 2;
+    const nameFree = iconDist(xm - 40, yb + 24) > 26 && iconDist(xm, yb + 24) > 26 && iconDist(xm + 40, yb + 24) > 26;   // never print a name over an icon
+    if (P.names && c.s > 60 && nameFree) {
       octx.font = '600 10px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
       try { octx.letterSpacing = '3.4px'; } catch (e) { }
       octx.textAlign = 'center'; octx.textBaseline = 'top';
@@ -189,11 +234,15 @@ function renderOverlay() {
   }
   const la = linkA * linkA * (3 - 2 * linkA);
   if (la > 0.003 && links.length) {
-    octx.strokeStyle = `rgba(150,186,255,${0.34 * la})`; octx.lineWidth = 1;
-    octx.beginPath();
-    for (const [x0, y0, x1, y1] of links) { octx.moveTo(x0, y0); octx.lineTo(x1, y1); }
-    octx.stroke();
-    for (const [x0, y0, x1, y1] of links) { drawStar(x0, y0, 3, 2, la * 0.8); drawStar(x1, y1, 3, 2, la * 0.8); }
+    // a faint chart line that fades in from each end, and a small star where it meets an icon
+    octx.lineWidth = 0.8;
+    for (const [x0, y0, x1, y1] of links) {
+      const g = octx.createLinearGradient(x0, y0, x1, y1), e = Math.min(0.45, 26 / Math.max(1, Math.hypot(x1 - x0, y1 - y0)));
+      g.addColorStop(0, 'rgba(160,190,255,0)'); g.addColorStop(e, `rgba(160,190,255,${0.20 * la})`);
+      g.addColorStop(1 - e, `rgba(160,190,255,${0.20 * la})`); g.addColorStop(1, 'rgba(160,190,255,0)');
+      octx.strokeStyle = g; octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke();
+    }
+    for (const [x0, y0, x1, y1] of links) { drawStar(x0, y0, 3, 2, la * 0.55); drawStar(x1, y1, 3, 2, la * 0.55); }
   }
   gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, ovTex);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -203,18 +252,21 @@ function renderOverlay() {
 }
 
 boot({
-  defaults: { sigma: 60, mw: 0.75, cons: 3, names: 1, links: 1, stars: 0.6, meteors: 1, horizon: 1 },
+  defaults: { sigma: 60, mw: 0.75, cons: 0, names: 1, links: 1, stars: 0.6, meteors: 1, horizon: 1 },
   layoutKeys: ['cons', 'names', 'links', 'horizon', 'mw'],
   fs: `
 uniform vec4 uMW;        // Milky Way: a point on its axis (x, y), angle, half-width
-uniform vec2 uMW2;       // position of the bright core along the axis, brightness
+uniform vec4 uMW2;       // position of the bright core along the axis, brightness, curvature, -
 uniform vec2 uHz;        // horizon: amount (0 hidden .. 1), taskbar height
 uniform vec4 uMet;       // meteor: from (x, y) to (x, y)
 uniform float uMetT;     // meteor progress 0..1 (< 0: none)
 uniform sampler2D uOv;   // star charts drawn on a 2D canvas (premultiplied)
 uniform vec2 uOvSize;
+uniform sampler2D uCeil; // horizon ceiling per column (height above the bottom edge)
+uniform float uCeilN;
 
 float ridge(float x, float scale, float row) { return texture(uNoise, vec2(x / scale + uSeed, row)).r; }
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
 
 void main() {
   vec2 p = fragPx();
@@ -228,29 +280,49 @@ void main() {
   col += vec3(0.050, 0.150, 0.170) * exp(-max(yb - hz, 0.0) / 260.0) * 0.75 * uHz.x;   // airglow
   col += vec3(0.340, 0.170, 0.090) * exp(-max(yb - hz, 0.0) / 95.0) * 0.80 * uHz.x;    // last light
 
-  // Milky Way: a meandering band of star clouds with a dark rift, brightest around the core
-  float w = uMW.w;
-  vec2 dir = vec2(cos(uMW.z), sin(uMW.z)), dd = p - uMW.xy;
-  vec2 mp = vec2(dot(dd, dir), dot(dd, vec2(-dir.y, dir.x)));
+  // Milky Way: a gently curved band of star clouds across the whole sky, brightest around the core
+  float w = uMW.w, diag = length(uRes);
+  vec2 dir = vec2(cos(uMW.z), sin(uMW.z)), nrm = vec2(-dir.y, dir.x), dd = p - uMW.xy;
+  vec2 mp = vec2(dot(dd, dir), dot(dd, nrm));
+  mp.y -= uMW2.z * mp.x * mp.x / diag;
   vec4 m1 = N(mp, 1500.0);
-  vec4 m2 = N(mp * vec2(1.0, 1.5) + 91.0, 560.0);
-  vec4 m3 = N(mp + 37.0, 190.0);
+  vec4 m2 = N(mp * vec2(0.7, 1.4) + 91.0, 560.0);            // stretched along the band
+  vec4 m3 = N(mp * vec2(0.8, 1.2) + 37.0, 190.0);
   float nn = mp.y + (m1.r - 0.5) * w * 0.9;
-  float tc = (mp.x - uMW2.x) / (w * 2.8);
+  float tc = (mp.x - uMW2.x) / (w * 3.0);
   float core = exp(-tc * tc);
-  float wd = w * (0.72 + 0.60 * core);
+  float wd = w * (0.78 + 0.55 * core);
   float band = exp(-nn * nn / (wd * wd));
+  float glow = exp(-nn * nn / (wd * wd * 4.0));               // wide faint skirt of unresolved stars
   float clouds = band * (0.30 + 0.95 * m2.g) * (0.62 + 0.62 * m3.r);
-  float rn = nn + (m2.r - 0.5) * w * 0.95 - w * 0.08;
-  float rift = exp(-rn * rn / (w * w * 0.085)) * ss(0.28, 0.62, m2.b * 0.65 + m3.g * 0.35);
-  float patches = ss(0.56, 0.74, m3.a * 0.5 + m2.a * 0.5) * band;
-  float lum = clouds * (1.0 - 0.82 * rift) * (1.0 - 0.5 * patches) * uMW2.y;
-  lum *= mix(0.40, 1.0, ss(-30.0, 70.0, s));                 // dimmer behind icons, labels stay readable
+
+  // the Great Rift: a meandering dark lane running along the band, patchy, with dark filaments branching off
+  float rn = nn - w * 0.18 + (m2.r - 0.5) * w * 0.85;
+  float rift = exp(-rn * rn / (w * w * (0.06 + 0.07 * m1.g))) * (0.35 + 0.55 * ss(0.30, 0.66, m2.b * 0.6 + m3.g * 0.4)) * ss(0.25, 0.6, m1.b + 0.25 * core);
+  float wisps = ss(0.56, 0.80, m2.a * 0.7 + m3.a * 0.3) * band * 0.38;
+  float natural = clamp(rift + wisps, 0.0, 1.0);
+
+  // icons crossing the band cut dark rifts into it, stretched along the band, with softly glowing edges
+  float dustI = 0.0, edge = 0.0;
+  if (band + glow > 0.01) {
+    float sa = min(s, min(iconField(p + dir * 90.0), iconField(p - dir * 90.0)) + 40.0);
+    float sw = sa + (m3.g - 0.5) * 58.0 + (m2.a - 0.5) * 30.0;
+    dustI = ss(70.0, -10.0, sw) * (0.80 + 0.20 * m3.r);
+    edge = exp(-(sw - 60.0) * (sw - 60.0) / 520.0) * (0.45 + 0.55 * ss(0.3, 0.7, m3.b));
+  }
+  float dark = clamp(natural * 0.80 + dustI * 0.60, 0.0, 0.90);
+  float lum = (clouds * (1.0 - dark) + 0.16 * glow * (1.0 - 0.35 * dustI)) * uMW2.y;
   vec3 mwCol = mix(vec3(0.30, 0.45, 0.95), vec3(1.0, 0.80, 0.56), clamp(core * 0.85 + band * 0.10, 0.0, 1.0));
   col += mwCol * lum * (0.50 + 1.0 * core);
-  col += vec3(0.95, 0.30, 0.46) * ss(0.80, 0.96, m3.b) * band * 0.10 * uMW2.y;
+  // dust is not black: a faint brown glow of the band behind it
+  col += vec3(0.075, 0.048, 0.034) * band * dark * (0.6 + 0.6 * m3.r) * (0.5 + core) * uMW2.y;
+  // bright star clouds piled up along the rims of the icon rifts
+  col += mix(vec3(0.62, 0.70, 1.0), vec3(1.0, 0.86, 0.66), core) * edge * band * (0.40 + 0.60 * m2.g) * (0.7 + 0.8 * core) * uMW2.y;
+  col += vec3(0.95, 0.30, 0.46) * ss(0.80, 0.96, m3.b) * band * (1.0 - dark) * 0.12 * uMW2.y;
 
-  vec3 st = starField(p, 1.7 * band * uMW2.y * (1.0 - 0.6 * rift));
+  vec3 st = starField(p, 1.7 * band * uMW2.y * (1.0 - 0.7 * dark));
+  st += starLayer(p, 5.0, 0.40, 0.40, 77.0) * clamp(clouds * 1.6, 0.0, 1.0) * (1.0 - dark) * 0.9 * uMW2.y;   // the band's grain: countless faint stars
+  st *= 1.0 - 0.75 * dark * band;                             // dust hides the stars behind it
   st *= 0.35 + 0.65 * ss(0.0, 0.22, up);                      // haze near the horizon
   col += st;
 
@@ -269,16 +341,22 @@ void main() {
     col += vec3(0.85, 0.93, 1.0) * exp(-d * d / (0.5 + 1.6 * h)) * h * h * fade * 1.3;
   }
 
-  // horizon: a hazy far range, then a near ridge with pines, both in silhouette
+  // horizon: a hazy far range, then a near ridge with pines, both in silhouette; both dip under low icons
   if (uHz.x > 0.001 && yb < uHz.y + 330.0) {
+    float cz = texture(uCeil, vec2((p.x / 4.0 + 0.5) / uCeilN, 0.5)).r;
+    float base = uHz.y - 2.0;
     float far = uHz.y + (40.0 + 150.0 * ridge(p.x, 2600.0, 0.13) + 34.0 * ridge(p.x, 640.0, 0.57) + 7.0 * ridge(p.x, 150.0, 0.81)) * uHz.x;
+    far = max(smin(far, cz + 6.0, 46.0), base);
     col = mix(col, vec3(0.020, 0.036, 0.074) + vec3(0.030, 0.024, 0.020) * exp(-max(far - yb, 0.0) / 60.0), ss(far + 1.0, far - 1.0, yb));
     float near = uHz.y + (14.0 + 78.0 * ridge(p.x + 500.0, 1900.0, 0.31) + 12.0 * ridge(p.x, 330.0, 0.43)) * uHz.x;
+    near = max(smin(near, cz - 8.0, 40.0), base);
+    float room = ss(0.0, 46.0, cz - near);                    // pines thin out and shrink where there is no room
     float cw = 13.0, cx = floor(p.x / cw), fx = abs(fract(p.x / cw) - 0.5) * 2.0;
-    float th = (9.0 + 30.0 * pow(h21(vec2(cx, 3.0)), 1.6)) * step(h21(vec2(cx, 9.0)), 0.72);
+    float th = (9.0 + 30.0 * pow(h21(vec2(cx, 3.0)), 1.6)) * step(h21(vec2(cx, 9.0)), 0.72 * room + 0.02);
     float cw2 = 21.0, cx2 = floor(p.x / cw2 + 0.37), fx2 = abs(fract(p.x / cw2 + 0.37) - 0.5) * 2.0;
-    float th2 = (16.0 + 34.0 * h21(vec2(cx2, 5.0))) * step(h21(vec2(cx2, 2.0)), 0.5);
-    near += max(max(0.0, th * (1.0 - fx * 1.35)), max(0.0, th2 * (1.0 - fx2 * 1.5))) * uHz.x;
+    float th2 = (16.0 + 34.0 * h21(vec2(cx2, 5.0))) * step(h21(vec2(cx2, 2.0)), 0.5 * room);
+    float trees = max(max(0.0, th * (1.0 - fx * 1.35)), max(0.0, th2 * (1.0 - fx2 * 1.5)));
+    near += min(trees * room, max(cz - near, 0.0)) * uHz.x;
     col = mix(col, vec3(0.005, 0.008, 0.016), ss(near + 1.0, near - 1.0, yb));
   }
   o = vec4(finish(col), 1.0);
@@ -292,22 +370,29 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     hz = P.horizon;
+    hcTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, hcTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   },
   onSeed() { shuffleFigures(); cons = []; mw.set = false; },
-  onLayout(fromEmpty) { routeMilkyWay(fromEmpty); placeConstellations(fromEmpty); linkIcons(); ovDirty = true; },
+  onLayout(fromEmpty) { routeMilkyWay(fromEmpty); placeConstellations(fromEmpty); linkIcons(); buildCeiling(); if (fromEmpty) updateCeiling(-1); ovDirty = true; },
   step(dt) {
     const k = 1 - Math.exp(-dt * 2.2);
-    mw.x += (mw.tx - mw.x) * k; mw.y += (mw.ty - mw.y) * k; mw.ang += (mw.tang - mw.ang) * k; mw.core += (mw.tcore - mw.core) * k;
+    mw.x += (mw.tx - mw.x) * k; mw.y += (mw.ty - mw.y) * k; mw.ang += (mw.tang - mw.ang) * k; mw.core += (mw.tcore - mw.core) * k; mw.curve += (mw.tcurve - mw.curve) * k;
+    if (hcMoving) hcMoving = updateCeiling(dt);
     hz += (P.horizon - hz) * (1 - Math.exp(-dt * 3));
     for (let i = cons.length - 1; i >= 0; i--) {
       const c = cons[i];
       const moving = Math.abs(c.tx - c.x) + Math.abs(c.ty - c.y) + Math.abs(c.ts - c.s) > 0.3;
       if (moving) { c.x += (c.tx - c.x) * k; c.y += (c.ty - c.y) * k; c.s += (c.ts - c.s) * k; ovDirty = true; }
-      const a = c.dying ? c.a - dt / 0.8 : Math.min(1, c.a + dt / 1.8);
+      const a = c.dying ? c.a - dt / 0.8 : QS.has('nofade') ? 1 : Math.min(1, c.a + dt / 1.8);
       if (a !== c.a) { c.a = a; ovDirty = true; }
       if (c.a <= 0 && c.dying) cons.splice(i, 1);
     }
-    if (linkA < 1 && curMix > 0.55) { linkA = Math.min(1, linkA + dt / 1.2); ovDirty = true; }
+    if (linkA < 1 && curMix > 0.55) { linkA = QS.has('nofade') ? 1 : Math.min(1, linkA + dt / 1.2); ovDirty = true; }
     // meteors
     if (meteor) { meteor.t += dt / meteor.dur; if (meteor.t >= 1) meteor = null; }
     else if (P.meteors > 0 && (nextMeteor -= dt * P.meteors) <= 0) {
@@ -323,12 +408,35 @@ void main() {
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, ovTex); gl.uniform1i(U.uOv, 3);
     gl.uniform2f(U.uOvSize, cv.width, cv.height);
     gl.uniform4f(U.uMW, mw.x, mw.y, mw.ang, mwWidth());
-    gl.uniform2f(U.uMW2, mw.core, P.mw);
+    gl.uniform4f(U.uMW2, mw.core, P.mw, mw.curve, 0);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, hcTex); gl.uniform1i(U.uCeil, 4); gl.uniform1f(U.uCeilN, hcN);
     gl.uniform2f(U.uHz, hz, TASKBAR);
     if (meteor) { gl.uniform4f(U.uMet, meteor.x0, meteor.y0, meteor.x1, meteor.y1); gl.uniform1f(U.uMetT, meteor.t); }
     else gl.uniform1f(U.uMetT, -1);
   },
 });
+
+// test layouts for screenshots: ?layout=0 tidy, 1 messy, 2 minimal, 3 a block in the middle, 4 empty, 5 a row along the bottom
+if (!(WALL || PREVIEW) && QS.has('layout')) setTimeout(() => {
+  const L = +QS.get('layout');
+  if (QS.has('seed')) { seed = +QS.get('seed'); THEME.onSeed(); }
+  if (QS.has('set')) Object.assign(P, JSON.parse(QS.get('set')));
+  if (L < 3) { demoApply(L); return; }
+  icons.forEach(ic => ic.el.remove()); icons = [];
+  const g = demoGrid(); let i = 0;
+  if (L === 3) {
+    for (let r = 0; r < g.rows; r++) demoAdd(i++, demoCell(0, r));
+    const c0 = Math.round(g.cols / 2) - 2, r0 = Math.round(g.rows / 2) - 2;
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 3; r++) demoAdd(i++, demoCell(c0 + c, r0 + r));
+    demoAdd(i++, demoCell(g.cols - 3, 1));
+  } else if (L === 5) {
+    for (let c = 0; c < 6; c++) demoAdd(i++, demoCell(c, g.rows - 1));
+    for (let c = 0; c < 3; c++) demoAdd(i++, demoCell(Math.round(g.cols * 0.55) + c, g.rows - 1));
+    demoAdd(i++, demoCell(g.cols - 2, g.rows - 2)); demoAdd(i++, demoCell(g.cols - 2, g.rows - 1));
+    demoAdd(i++, demoCell(Math.round(g.cols * 0.3), 1));
+  }
+  commit(true);
+}, 0);
 </script>
 <script src="share.js"></script>
 </body>

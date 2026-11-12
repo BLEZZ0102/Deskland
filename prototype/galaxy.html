@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deskland · Galaxy</title>
 <!--
-  Deskland · Galaxy theme (deep field; WebGL2, drawn every frame)
-  - A spiral galaxy settles into the largest empty area of the desktop: its size, tilt and orientation follow the shape of that free space
-  - Smaller companion galaxies take the next free spots; move icons and everything glides to a new place
+  Deskland · Galaxy theme (inside a spiral galaxy, seen close up; WebGL2, drawn every frame)
+  - One huge spiral galaxy fills the whole desktop; its bright core glides to the largest empty area, its tilt follows that space
+  - Icons sit in dark dust lanes between the arms, edged by glowing star-forming regions; the arms bend around icon groups
+  - A few tiny background galaxies shine through the outer disc, far from the icons
   License: GPL-3.0, same as Deskland.
 -->
 <link rel="stylesheet" href="astro.css">
@@ -22,8 +23,9 @@
 <script>
 'use strict';
 const ARMS = [2, 3, 4];
-const gal = { x: 0, y: 0, R: 0, ang: 0.5, ratio: 0.55, tx: 0, ty: 0, tR: 0, tang: 0.5, tratio: 0.55, vis: 0, set: false };
-let comps = [];                                              // companions: current + target values, fading in and out
+const PITCH = 2.5;                                           // arm winding: phase = arms * (angle - PITCH * ln r)
+const gal = { x: 0, y: 0, R: 0, ang: 0.5, ratio: 0.7, tx: 0, ty: 0, tR: 0, tang: 0.5, tratio: 0.7, vis: 0, set: false };
+let comps = [];                                              // tiny background galaxies: current + target values, fading in and out
 const uC = new Float32Array(16), uC2 = new Float32Array(16);
 
 // how far the free space reaches from (x, y) in direction a
@@ -36,100 +38,135 @@ function reach(x, y, a, pad) {
   }
   return maxD;
 }
-function placeGalaxies(fromEmpty) {
+// disc radius: the farthest screen corner (in the de-projected disc) sits near the edge of the visible disc
+function discRadius(x, y, ang, ratio) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  let far = 0;
+  for (const [px, py] of [[0, 0], [W, 0], [0, H], [W, H]]) {
+    const dx = px - x, dy = py - y, lx = c * dx - s * dy, ly = (s * dx + c * dy) / ratio;
+    far = Math.max(far, Math.hypot(lx, ly));
+  }
+  return far * (0.55 + 0.5 * P.size);
+}
+function placeGalaxy(fromEmpty) {
   const rnd = mulberry32(seed + 77);
   const pad = 14 + P.sigma * 0.35;
-  const prefer = { x: W * (0.42 + 0.16 * rnd()), y: (H - TASKBAR) * (0.42 + 0.16 * rnd()) };
-  const sp = freeSpots(1, { edge: 1.2, pad, minR: 30, prefer })[0] || { x: W / 2, y: (H - TASKBAR) / 2, r: 60 };
-  // orientation and tilt follow the shape of the free space around that spot
+  const prefer = { x: W * (0.40 + 0.20 * rnd()), y: (H - TASKBAR) * (0.40 + 0.20 * rnd()) };
+  const sp = freeSpots(1, { edge: 1.4, pad, minR: 30, prefer })[0] || { x: W / 2, y: (H - TASKBAR) / 2, r: 60 };
+  // the bulge's long axis follows the shape of the free space around the core
   const both = a => Math.min(reach(sp.x, sp.y, a, pad), reach(sp.x, sp.y, a + Math.PI, pad));
   let best = -1, bestA = 0;
   const a0 = rnd() * Math.PI;                                // on an empty desktop the seed picks the direction
   for (let i = 0; i < 18; i++) { const a = a0 + i * Math.PI / 18, e = both(a) * (1 - 0.0005 * i); if (e > best) { best = e; bestA = a; } }
   if (gal.set && both(gal.tang) > 0.9 * best) { bestA = gal.tang; best = both(bestA); }   // keep the direction unless a clearly better one appears
   const minor = Math.max(both(bestA + Math.PI / 2), sp.r);
-  const cap = 0.52 * Math.min(W, H - TASKBAR);
-  gal.tR = clamp(Math.min(best, cap) * P.size, 46, cap * 1.35);
-  gal.tratio = clamp(minor / Math.max(Math.min(best, cap), 1) * 0.95, 0.30, 0.66);
+  gal.tratio = clamp(Math.sqrt(minor / Math.max(best, 1)) * 0.95, 0.56, 0.86);
   gal.tx = sp.x; gal.ty = sp.y;
   // shortest way round (the disc looks the same turned by half a circle)
   let da = (bestA - gal.ang) % Math.PI; if (da > Math.PI / 2) da -= Math.PI; if (da < -Math.PI / 2) da += Math.PI;
   gal.tang = gal.ang + da;
+  gal.tR = discRadius(gal.tx, gal.ty, gal.tang, gal.tratio);
   if (!gal.set || fromEmpty) { gal.x = gal.tx; gal.y = gal.ty; gal.R = gal.tR; gal.ang = gal.tang; gal.ratio = gal.tratio; gal.vis = 0; gal.set = true; }
 
-  // companions take the next free spots, away from the main disc
+  // tiny background galaxies take the free spots farthest from icons, away from the core
   const want = clamp(Math.round(P.companions), 0, 4);
-  const spots = want ? freeSpots(want, { edge: 1.6, pad: pad + 6, minR: 34, sep: 1.5, blocked: [{ x: sp.x, y: sp.y, r: gal.tR * 1.2 }], prefer: { x: W - prefer.x, y: H - TASKBAR - prefer.y } }) : [];
+  const spots = want ? freeSpots(want, { edge: 1.0, top: 20, pad: 70 + P.sigma, minR: 14, sep: 3, blocked: [{ x: sp.x, y: sp.y, r: 0.16 * Math.hypot(W, H) }], prefer: { x: W - prefer.x, y: H - TASKBAR - prefer.y } }) : [];
   for (const c of comps) c.used = false;
   for (const s of spots) {
-    const tr = Math.min(s.r * 0.78, gal.tR * 0.34, 130);
+    const tr = clamp(s.r * 0.12, 7, 17);
     let c = null, bd = 1e9;
     for (const o of comps) if (!o.used && !o.dying) { const d = Math.hypot(o.tx - s.x, o.ty - s.y); if (d < bd) { bd = d; c = o; } }
     if (!c) {
-      c = { x: s.x, y: s.y, r: tr, a: 0, ang: rnd() * Math.PI, ratio: 0.38 + 0.5 * rnd(), kind: rnd() < 0.6 ? 1 : 0, ph: rnd() };
+      c = { x: s.x, y: s.y, r: tr, a: 0, ang: rnd() * Math.PI, ratio: 0.3 + 0.55 * rnd(), kind: rnd() < 0.55 ? 1 : 0, ph: rnd() };
       comps.push(c);
     }
     c.used = true; c.dying = false; c.tx = s.x; c.ty = s.y; c.tr = tr;
     if (fromEmpty) { c.x = s.x; c.y = s.y; c.r = tr; c.a = 0; }
   }
   for (const c of comps) if (!c.used) c.dying = true;
+  buildBend();
+}
+
+/* ---------- arm bending: a coarse field that shifts the spiral phase so icon groups fall between the arms ----------
+   Each icon wants the arm phase at its centre to lie inside the inter-arm lane (pi +- LANE); it asks for the smallest
+   shift that gets it there, so no wish is ever more than pi - LANE. The wish is spread around the icon with a soft
+   weight, neighbouring wishes are averaged as unit vectors and blended with "no shift" by how strongly icons cover the
+   spot. Because no wish reaches pi, that blend never passes through zero (which would flip the arms along a line).
+   The shader adds the angle of the vector to the phase. */
+const LANE = 0.25 * Math.PI;
+const BC = 24;                                               // bend grid cell (CSS px)
+let bw = 1, bh = 1, bendTex = null, bendCur = null, bendTgt = null, bendList = [], bendMoving = true;
+function buildBend() {
+  bw = Math.ceil(W / BC) + 2; bh = Math.ceil(H / BC) + 2;
+  if (!bendCur || bendCur.length !== bw * bh * 4) {
+    bendCur = new Float32Array(bw * bh * 4); bendTgt = new Float32Array(bw * bh * 4);
+    for (let i = 0; i < bw * bh; i++) bendCur[i * 4] = 1;
+    gl.bindTexture(gl.TEXTURE_2D, bendTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, bw, bh, 0, gl.RGBA, gl.FLOAT, null);
+  }
+  // sparse weights: for every icon, the grid cells it influences
+  const sc = 90 + P.sigma * 0.9, R = 3 * sc, i2 = 1 / (2 * sc * sc);
+  bendList = activeIcons().map(ic => {
+    const cx = ic.x + ic.w / 2, cy = ic.y + ic.h / 2, idx = [], w = [];
+    const gx0 = Math.max(0, Math.floor((cx - R) / BC)), gx1 = Math.min(bw - 1, Math.ceil((cx + R) / BC));
+    const gy0 = Math.max(0, Math.floor((cy - R) / BC)), gy1 = Math.min(bh - 1, Math.ceil((cy + R) / BC));
+    for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) {
+      const dx = gx * BC - cx, dy = gy * BC - cy, d2 = dx * dx + dy * dy;
+      if (d2 < R * R) { idx.push(gy * bw + gx); w.push(Math.exp(-d2 * i2)); }
+    }
+    return { cx, cy, idx, w };
+  });
+  bendMoving = true;
+}
+function armPhase(x, y) {                                    // same as the shader, without the noise
+  const c = Math.cos(gal.ang), s = Math.sin(gal.ang), dx = x - gal.x, dy = y - gal.y;
+  const lx = c * dx - s * dy, ly = (s * dx + c * dy) / gal.ratio;
+  const r = Math.max(Math.hypot(lx, ly) / gal.R, 0.02);
+  return ARMS[clamp(Math.round(P.arms), 0, 2)] * (Math.atan2(ly, lx) - PITCH * Math.log(r));
+}
+function updateBend(dt) {
+  const n = bw * bh, sx = new Float32Array(n), sy = new Float32Array(n), sw = new Float32Array(n);
+  for (const b of bendList) {
+    let d = (Math.PI - armPhase(b.cx, b.cy)) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI;
+    const want = Math.sign(d) * Math.max(0, Math.abs(d) - LANE), cs = Math.cos(want), sn = Math.sin(want);
+    for (let k = 0; k < b.idx.length; k++) { const i = b.idx[k], w = b.w[k]; sx[i] += w * cs; sy[i] += w * sn; sw[i] += w; }
+  }
+  const k = dt < 0 ? 1 : 1 - Math.exp(-dt * 2.4);
+  let change = 0;
+  for (let i = 0; i < n; i++) {
+    const cover = 1 - Math.exp(-2.6 * sw[i]), inv = sw[i] > 1e-6 ? cover / sw[i] : 0;
+    const tx = 1 - cover + sx[i] * inv, ty = sy[i] * inv, j = i * 4;
+    bendTgt[j] = tx; bendTgt[j + 1] = ty; bendTgt[j + 2] = cover;
+    for (let c = 0; c < 3; c++) { const d = (bendTgt[j + c] - bendCur[j + c]) * k; bendCur[j + c] += d; change = Math.max(change, Math.abs(d)); }
+  }
+  gl.bindTexture(gl.TEXTURE_2D, bendTex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, bw, bh, gl.RGBA, gl.FLOAT, bendCur);
+  return change > 1e-4;
 }
 
 boot({
-  defaults: { sigma: 70, size: 1, arms: 0, flow: 1, companions: 2, stars: 0.6 },
-  layoutKeys: ['size', 'companions'],
+  defaults: { sigma: 70, size: 1, arms: 0, flow: 1, dust: 0.6, companions: 2, stars: 0.6 },
+  layoutKeys: ['size', 'companions', 'arms'],
   fs: `
-uniform vec4 uG;        // main galaxy: x, y, radius, angle
-uniform vec4 uG2;       // axis ratio, arm count, rotation, brightness
-uniform vec4 uC[4];     // companions: x, y, radius, angle
+uniform vec4 uG;        // core x, y, disc radius, position angle
+uniform vec4 uG2;       // axis ratio, arm count, turn of the star clouds, visibility
+uniform vec4 uG3;       // dust amount, winding, -, -
+uniform sampler2D uBend;
+uniform vec3 uBendG;    // cell size, grid w, h
+uniform vec4 uC[4];     // background galaxies: x, y, radius, angle
 uniform vec4 uC2[4];    // axis ratio, kind (0 elliptical, 1 spiral), phase, brightness
 
-vec3 spiral(vec2 d, out float lum) {
-  lum = 0.0;
-  float R = uG.z, ratio = uG2.x, arms = uG2.y, rot = uG2.z;
-  vec2 l = rot2(uG.w) * d;
-  l.y /= ratio;
-  float r = length(l) / R;
-  if (r > 1.45) return vec3(0.0);
-  float th = atan(l.y, l.x);
-  vec2 lr = rot2(rot) * l / R;                               // frame that turns with the arms
-  vec4 n1 = texture(uNoise, lr * 0.55 + uSeed * 3.0);
-  vec4 n2 = texture(uNoise, lr * 1.9 + uSeed * 5.0 + 0.37);
-  vec4 n3 = texture(uNoise, lr * 6.7 + uSeed * 7.0 + 0.11);
-  float ph = arms * (th - rot - 2.3 * log(max(r, 0.04))) + (n1.r - 0.5) * 1.5;
-  float arm = pow(0.5 + 0.5 * cos(ph), 1.5 + 1.5 * r);
-  float disk = exp(-r * 1.9);
-  float edge = ss(1.35, 0.62, r);
-  float inner = ss(0.02, 0.15, r);
-  float grain = 0.80 + 0.40 * n3.b;                          // unresolved star clouds
-  float armI = disk * (0.22 + arm * (1.3 + 3.4 * n2.g * grain) * inner) * edge;
-  float lane = pow(0.5 + 0.5 * cos(ph + 1.05), 3.0) * ss(0.28, 0.60, n2.a * 0.7 + n3.g * 0.3) * ss(0.16, 0.36, r) * edge;   // dust on the inside of the arms
-  vec2 kc = lr * 15.0, kg = floor(kc), kf = fract(kc) - 0.5 - (h22(kg + uSeed * 31.0) - 0.5) * 0.6;
-  float kn = exp(-dot(kf, kf) * 60.0) * step(h21(kg + 3.3), 0.36);
-  float knots = kn * ss(0.36, 0.60, n2.r) * arm * disk * inner * edge * 7.0;                        // star-forming regions
-  vec2 lb = vec2(l.x, l.y * mix(ratio, 1.0, 0.5));
-  float rb = length(lb) / R;
-  float bulge = exp(-rb * rb * 110.0) * 2.4 + exp(-rb * 13.0) * 1.0;
-  vec3 col = mix(vec3(0.46, 0.66, 1.0), vec3(1.0, 0.88, 0.70), ss(0.5, 0.02, r)) * armI;
-  col *= 1.0 - 0.62 * lane;
-  col += vec3(1.0, 0.34, 0.52) * knots;
-  col += vec3(1.0, 0.84, 0.58) * bulge * (1.0 - 0.3 * lane);
-  col += vec3(0.40, 0.50, 0.90) * exp(-r * 2.2) * 0.08;      // faint halo
-  lum = armI * uG2.w;
-  return col * uG2.w;
-}
-vec3 companion(vec2 d, vec4 c, vec4 c2) {
+vec3 distant(vec2 d, vec4 c, vec4 c2) {
   vec2 l = rot2(c.w) * d;
   l.y /= c2.x;
   float r = length(l) / c.z;
-  if (r > 1.6) return vec3(0.0);
-  float core = exp(-r * r * 38.0) * 1.2 + exp(-r * 5.5) * 0.55;
-  vec3 col = vec3(1.0, 0.85, 0.66) * core;
+  if (r > 2.2) return vec3(0.0);
+  vec3 col = vec3(1.0, 0.86, 0.68) * (exp(-r * r * 30.0) * 1.1 + exp(-r * 4.5) * 0.45);
   if (c2.y > 0.5) {
     float th = atan(l.y, l.x);
-    float n = texture(uNoise, l / c.z * 0.9 + c2.z).g;
-    float arm = pow(0.5 + 0.5 * cos(2.0 * (th - 2.7 * log(max(r, 0.05))) + c2.z * 6.283 + (n - 0.5) * 2.0), 2.0);
-    col = col * 0.75 + vec3(0.60, 0.73, 1.0) * exp(-r * 3.2) * (0.22 + 1.9 * arm * (0.5 + n)) * ss(1.4, 0.7, r);
+    float arm = pow(0.5 + 0.5 * cos(2.0 * (th - 2.6 * log(max(r, 0.05))) + c2.z * 6.283), 2.0);
+    col = col * 0.8 + vec3(0.62, 0.74, 1.0) * exp(-r * 3.0) * (0.25 + 1.2 * arm) * ss(1.5, 0.6, r);
   }
   return col * c2.w;
 }
@@ -137,48 +174,160 @@ vec3 companion(vec2 d, vec4 c, vec4 c2) {
 void main() {
   vec2 p = fragPx();
   float s = iconField(p);
-  vec4 bg = N(p, 2300.0);
-  vec3 col = vec3(0.008, 0.010, 0.024) + vec3(0.016, 0.012, 0.036) * bg.r + vec3(0.000, 0.010, 0.018) * bg.g;
+  float R = uG.z, ratio = uG2.x, m = uG2.y, dustAmt = uG3.x;
 
-  float lum;
-  vec3 g = spiral(p - uG.xy, lum);
-  for (int i = 0; i < 4; i++) if (uC2[i].w > 0.001) g += companion(p - uC[i].xy, uC[i], uC2[i]);
-  // galaxies stay out of the way: their light dims inside the space kept clear around icons
-  float clear = ss(-34.0, 70.0, s);
-  g *= mix(0.16, 1.0, clear);
+  // de-projected disc coordinates (px) and the frame the star clouds turn with
+  vec2 l = rot2(uG.w) * (p - uG.xy);
+  vec2 ld = vec2(l.x, l.y / ratio);
+  float r = length(ld) / R;
+  float th = atan(ld.y, ld.x);
+  vec2 q = rot2(uG2.z) * ld;                                 // the star clouds stream slowly through the arms
+  vec4 n1 = N(q, 1900.0);
+  vec4 n2 = N(rot2(1.3) * q + 71.0, 610.0);
+  vec4 n3 = N(rot2(-0.6) * q + 23.0, 210.0);
+  vec4 n4 = N(rot2(2.4) * q + 9.0, 120.0);
 
-  vec3 st = starField(p, min(lum * 3.0, 1.2) * clear);
-  col += g + st * (1.0 - 0.45 * clamp(dot(g, vec3(0.5)), 0.0, 1.0));
+  // spiral phase, bent around icon groups by the bend field (see buildBend)
+  vec4 bf = texture(uBend, (p / uBendG.x + 0.5) / uBendG.yz);
+  float bl = length(bf.xy);
+  float cover = bf.z;
+  float ph = m * (th - uG3.y * log(max(r, 0.02)))
+           + ((n1.r - 0.5) * 2.2 + (n2.r - 0.5) * 0.7) * (1.0 - 0.6 * cover)
+           + atan(bf.y, bf.x + 1e-5);
+  float wave = cos(ph);
+  float amp = ss(0.0, 0.3, bl);                              // where opposite wishes cancel, the arms fade instead of pinching
+
+  // light: bulge, smooth disc, arms with clumpy star clouds, feathery spurs
+  vec2 lb = vec2(l.x, l.y * mix(ratio, 1.0, 0.45) / ratio);
+  float rb = length(lb) / R;
+  float bulge = exp(-rb * rb * 420.0) * 1.9 + exp(-rb * 19.0) * 0.62 + exp(-rb * 6.0) * 0.12;
+  float inner = ss(0.03, 0.16, r);
+  float disk = (0.24 * exp(-r * 2.4) + 0.055) * ss(1.4, 0.75, r);
+  float armP = 0.5 + 0.5 * mix(-0.25, wave, amp);
+  float arm = pow(armP, 3.0);
+  float clump = 0.45 + 0.9 * ss(0.15, 0.85, n2.g) * (0.75 + 0.5 * n3.b);
+  float fe = 0.5 + 0.5 * cos(3.0 * ph + (n2.b - 0.5) * 5.0), fe2 = fe * fe;
+  float feather = fe2 * fe2 * fe * ss(0.25, 0.7, armP);
+  float armI = (arm * clump * (0.55 + 0.75 * n4.r * n4.g * 1.6) + 0.20 * feather * n3.r) * (0.85 * exp(-r * 1.3) + 0.16) * inner * ss(1.45, 0.72, r);
+  float grain = 0.90 + 0.20 * n4.g;
+  float light = disk * grain + armI * 1.45;
+
+  // dust: lanes on the inner edge of each arm and thin filaments that follow the spiral
+  float la = 0.5 + 0.5 * cos(ph + 0.85 + (n3.r - 0.5) * 0.6), la2 = la * la;
+  float laneP = la2 * la2 * la2 * amp;
+  float fi = 0.5 + 0.5 * cos(3.0 * ph + 1.9 + (n2.a - 0.5) * 3.0), fi2 = fi * fi;
+  float fil = fi2 * fi2 * fi2 * ss(0.3, 0.7, armP) * ss(0.45, 0.75, n3.a);
+  float dustN = ss(0.25, 0.62, n2.a * 0.55 + n3.g * 0.30 + n4.a * 0.15);
+  float dust = clamp((laneP * 1.0 + fil * 0.45) * dustN * (0.75 + 0.5 * n4.a) * dustAmt * 1.5 * ss(0.05, 0.18, r) * (0.55 + 0.45 * exp(-r * 1.5)), 0.0, 0.9);
+
+  // the clearing around icons: a dark lane with a ragged edge
+  float sw = s + (n2.g - 0.5) * 92.0 + (n3.b - 0.5) * 34.0 + (n4.b - 0.5) * 5.0;
+  float open = ss(-6.0, 120.0, sw);
+  float rim = exp(-(sw - 10.0) * (sw - 10.0) / 140.0);
+  float halo = exp(-abs(sw - 10.0) / (sw > 10.0 ? 52.0 : 16.0));
+
+  vec3 young = vec3(0.40, 0.58, 1.0), old = vec3(1.0, 0.80, 0.58);
+  vec3 armCol = mix(young, mix(old, vec3(1.0), 0.25), ss(0.32, 0.04, r) * 0.9);
+  vec3 diskCol = mix(vec3(0.74, 0.74, 0.80), vec3(1.0, 0.86, 0.70), ss(0.55, 0.05, r));
+  vec3 g = diskCol * disk * grain + armCol * armI * 1.45;
+  g *= mix(vec3(1.0), vec3(0.14, 0.09, 0.07), dust);         // dust absorbs, reddening what it lets through
+  g += vec3(1.0, 0.84, 0.60) * bulge * (1.0 - 0.45 * dust);
+
+  // star-forming regions: pink knots and blue clusters strung along the arms and along the edges of the lanes
+  vec2 kc = q / 26.0, kg = floor(kc);
+  vec2 kf = fract(kc) - 0.5 - (h22(kg + uSeed * 31.0) - 0.5) * 0.5;
+  float kh = h21(kg + 3.3), ks = h21(kg + 8.1);
+  float krad = 0.006 + 0.014 * ks * ks;
+  float kn = exp(-dot(kf, kf) / krad);
+  float edgeZone = rim * 0.9 + halo * 0.25;
+  float armZone = ss(0.55, 0.85, armP) * (1.0 - laneP * 0.6) * ss(0.12, 0.30, r);
+  float want = armZone * 0.16 + edgeZone * 0.30;
+  float knot = kn * step(kh, want) * (0.6 + 0.8 * ks) * (1.0 - 0.8 * dust);
+  vec3 hii = mix(vec3(1.0, 0.30, 0.50), vec3(0.70, 0.80, 1.0), step(0.62, h21(kg + 5.7)));
+  g += hii * knot * 1.1;
+  // diffuse pink glow of ionised gas along the same places
+  float neb = ss(0.50, 0.80, n3.r * 0.6 + n2.b * 0.4) * (armZone * 0.6 + edgeZone);
+  g += vec3(0.95, 0.28, 0.46) * neb * 0.16;
+  // the rim itself: bright young star clouds where the lane meets the arm (strongest where the arm is bright)
+  float presence = 0.30 + 0.70 * ss(0.10, 0.75, armP);
+  float arc = 0.35 + 0.65 * ss(0.30, 0.68, n2.b * 0.6 + n3.a * 0.4);
+  g += mix(vec3(0.58, 0.70, 1.0), vec3(1.0, 0.62, 0.72), n3.g) * (rim * 0.40 + halo * 0.10) * presence * arc * ss(0.04, 0.2, r);
+
+  // inside the lanes: only a faint brown glow of the disc behind the dust
+  float veil = (0.10 + 0.22 * ss(0.3, 0.75, n2.b * 0.6 + n3.g * 0.4)) * ss(-150.0, -10.0, s);   // the disc glimpsed through the dust, darkest right at the icons
+  float shade = mix(0.035 + veil, 1.0, open);
+  vec3 lane = vec3(0.046, 0.030, 0.024) * (0.65 + 0.5 * n2.b) * (0.4 + 0.6 * exp(-r * 1.5));
+  g = g * shade + lane * (1.0 - open) * ss(0.03, 0.15, r);
+  g *= uG2.w;
+
+  for (int i = 0; i < 4; i++) if (uC2[i].w > 0.001) g += distant(p - uC[i].xy, uC[i], uC2[i]) * (1.0 - 0.7 * dust);
+
+  vec3 col = vec3(0.006, 0.008, 0.018) + g;
+  vec3 st = starField(p, clamp(light * 1.4, 0.0, 1.3) * open);
+  // unresolved star clouds: a dense layer of tiny faint stars that gives the arms their grain
+  st += starLayer(p, 5.0, 0.42, 0.42, 77.0) * clamp(armI * 2.2, 0.0, 1.0) * shade * 0.95 * uG2.w;
+  st *= (1.0 - 0.75 * dust) * mix(0.55, 1.0, open);
+  col += st * (1.0 - 0.35 * clamp(dot(g, vec3(0.4)), 0.0, 1.0));
   vec2 uv = p / uRes - 0.5;
-  col *= 1.0 - 0.34 * dot(uv, uv);
+  col *= 1.0 - 0.30 * dot(uv, uv);
   o = vec4(finish(col), 1.0);
 }`,
+  init() {
+    bendTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, bendTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  },
   onSeed() { comps = []; gal.set = false; },
-  onLayout(fromEmpty) { placeGalaxies(fromEmpty); },
+  onLayout(fromEmpty) { placeGalaxy(fromEmpty); if (fromEmpty) updateBend(-1); },
   step(dt) {
     const k = 1 - Math.exp(-dt * 2.4);
+    const moved = Math.abs(gal.tx - gal.x) + Math.abs(gal.ty - gal.y) + Math.abs(gal.tR - gal.R) + 300 * (Math.abs(gal.tang - gal.ang) + Math.abs(gal.tratio - gal.ratio)) > 0.05;
     gal.x += (gal.tx - gal.x) * k; gal.y += (gal.ty - gal.y) * k; gal.R += (gal.tR - gal.R) * k;
     gal.ang += (gal.tang - gal.ang) * k; gal.ratio += (gal.tratio - gal.ratio) * k;
-    gal.vis = Math.min(1, gal.vis + dt / 2.2);
+    gal.vis = QS.has('nofade') ? 1 : Math.min(1, gal.vis + dt / 2.2);
+    if (moved || bendMoving) bendMoving = updateBend(dt) || moved;
     for (let i = comps.length - 1; i >= 0; i--) {
       const c = comps[i];
       c.x += (c.tx - c.x) * k; c.y += (c.ty - c.y) * k; c.r += (c.tr - c.r) * k;
-      c.a = c.dying ? c.a - dt / 0.9 : Math.min(1, c.a + dt / 1.6);
+      c.a = c.dying ? c.a - dt / 0.9 : QS.has('nofade') ? 1 : Math.min(1, c.a + dt / 1.6);
       if (c.a <= 0 && c.dying) comps.splice(i, 1);
     }
   },
   uniforms(U) {
     const v = gal.vis * gal.vis * (3 - 2 * gal.vis);
     gl.uniform4f(U.uG, gal.x, gal.y, gal.R, gal.ang);
-    gl.uniform4f(U.uG2, gal.ratio, ARMS[clamp(Math.round(P.arms), 0, 2)], -flowT * 0.012, v);
+    gl.uniform4f(U.uG2, gal.ratio, ARMS[clamp(Math.round(P.arms), 0, 2)], -(flowT * 0.003) % (2 * Math.PI), v);
+    gl.uniform4f(U.uG3, clamp(P.dust, 0, 1), PITCH, 0, 0);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, bendTex); gl.uniform1i(U.uBend, 3);
+    gl.uniform3f(U.uBendG, BC, bw, bh);
     uC.fill(0); uC2.fill(0);
     comps.slice(0, 4).forEach((c, i) => {
       uC.set([c.x, c.y, c.r, c.ang], i * 4);
-      uC2.set([c.ratio, c.kind, c.ph, Math.max(0, c.a) * 0.9], i * 4);
+      uC2.set([c.ratio, c.kind, c.ph, Math.max(0, c.a) * 0.8], i * 4);
     });
     gl.uniform4fv(U.uC, uC); gl.uniform4fv(U.uC2, uC2);
   },
 });
+
+// test layouts for screenshots: ?layout=0 tidy, 1 messy, 2 minimal, 3 a block in the middle, 4 empty
+if (!(WALL || PREVIEW) && QS.has('layout')) setTimeout(() => {
+  const L = +QS.get('layout');
+  if (QS.has('seed')) { seed = +QS.get('seed'); THEME.onSeed(); }
+  if (QS.has('set')) Object.assign(P, JSON.parse(QS.get('set')));
+  if (L < 3) { demoApply(L); return; }
+  icons.forEach(ic => ic.el.remove()); icons = [];
+  if (L === 3) {
+    const g = demoGrid(); let i = 0;
+    for (let r = 0; r < g.rows; r++) demoAdd(i++, demoCell(0, r));
+    const c0 = Math.round(g.cols / 2) - 2, r0 = Math.round(g.rows / 2) - 2;
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 3; r++) demoAdd(i++, demoCell(c0 + c, r0 + r));
+    demoAdd(i++, demoCell(g.cols - 3, 1));
+  }
+  commit(true);
+}, 0);
 </script>
 <script src="share.js"></script>
 </body>

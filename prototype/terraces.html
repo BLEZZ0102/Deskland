@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskland · Rice Terraces</title>
+<!--
+  Deskland · Rice Terraces theme (bird's-eye watercolour; WebGL2)
+  - Every icon group is a forested hilltop; rice terraces wrap around it as contour rings of one smooth height field
+  - Far from the icons the land settles into flat flooded paddies; a few gentle hills grow from noise so an empty desktop stays composed
+  - The terrain is painted once into a cached texture whenever the layout, season or settings change;
+    each frame only adds the moving parts (cloud reflections and shadows, wind in the rice, valley mist) and the sprite layer
+  License: GPL-3.0, same as Deskland.
+-->
+<link rel="stylesheet" href="astro.css">
+<script>
+  // ?dbg: show shader errors on the page (headless screenshots cannot read the console)
+  if (location.search.includes('dbg')) {
+    const e0 = console.error.bind(console);
+    console.error = (...a) => { e0(...a); const d = document.createElement('pre'); d.style.cssText = 'position:fixed;left:8px;top:8px;z-index:99;color:#f66;background:#000c;font:12px monospace;white-space:pre-wrap;max-width:90vw'; d.textContent = a.join(' '); document.documentElement.appendChild(d); };
+    addEventListener('error', ev => console.error(ev.message, ev.lineno));
+  }
+  // ?vw=&vh=: pin the page size (headless screenshots lay the page out smaller than the captured image)
+  { const q = new URLSearchParams(location.search), vw = +q.get('vw'), vh = +q.get('vh');
+    if (vw && vh) {
+      Object.defineProperty(window, 'innerWidth', { get: () => vw }); Object.defineProperty(window, 'innerHeight', { get: () => vh });
+      document.write(`<style>#art{width:${vw}px!important;height:${vh}px!important}</style>`);
+    } }
+</script>
+</head>
+<body>
+<canvas id="art"></canvas>
+<div id="desktop"></div>
+<div id="taskbar"><div id="clock"></div></div>
+<div id="demobar"><button data-a="layout">Change layout</button><button data-a="add">+ Icon</button><button data-a="seed">New valley</button></div>
+<div id="nogl">This browser does not support WebGL2.</div>
+<script src="astro-core.js"></script>
+<script src="sprites.js"></script>
+<script src="terraces-life.js"></script>
+<script>
+'use strict';
+const DEF = { sigma: 80, spacing: 24, season: 0, mist: 0.4, life: 0.5, wind: 1 };
+
+/* ---------- GLSL shared by the cached terrain pass and the per-frame pass ---------- */
+const TERRAIN_GLSL = `
+uniform vec4 uA;     // x terrace spacing (px), y hill size (sigma, px), z season 0..2, w pass (0 colour, 1 data for the sprites)
+uniform vec2 uHill;  // offset of the free hills' noise, chosen per seed so an empty desktop always has a few
+uniform float uFree; // 1 on an (almost) empty desktop: only then do the free hills wear a forest of their own
+const vec2 LT = vec2(-0.6, -0.8);           // direction toward the sun (screen space, y down)
+
+float spl(float x, float k) { return x > 20.0 * k ? x : k * log(1.0 + exp(x / k)); }
+float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0); return mix(b, a, h) + k * h * (1.0 - h); }
+// hill under every icon group: height rises ~1 px per px toward the icons
+float hIcon(float s) { float R = 1.7 * uA.y + 50.0; return spl(R - s, 0.35 * uA.y + 12.0); }
+// a few gentle hills of their own, so an empty desktop is never a flat plain
+// (blurred mip levels: only the broad octaves, so their contours stay smooth)
+// Shaped like the icon hills: steep terraced flanks, a flat forested top. They give way near icons, so the
+// ground between icon hills stays an open valley.
+float hNoise(vec2 p, float s) {
+  float n = textureLod(uNoise, p / 3400.0 + uHill, 3.0).a * 0.78 + textureLod(uNoise, rot2(1.1) * p / 2300.0 + uHill + 0.37, 3.0).a * 0.22;
+  float x = spl((n - 0.47) * 2300.0, 30.0);
+  return (260.0 * tanh(x / 260.0) - 25.0) * ss(30.0, 230.0, s);
+}
+float hBase(vec2 p, float s, out float hn) { hn = hNoise(p, s); return smax(hIcon(s), hn, 70.0); }
+`;
+
+/* ---------- cached terrain pass ---------- */
+const STATIC_FS = TERRAIN_GLSL + `
+// terrace coordinate: integer steps are the risers. wob = how much the hand-made wobble applies (slope dependent:
+// on gentle ground a wobble would crinkle the contours into islands)
+float terr(vec2 p, float hb, float wob) {
+  float h = smax(hb, -0.75 * uA.x, 30.0);                            // the valley floor sits between steps: no rings on it
+  h += ((N(p, 900.0).r - 0.5) * 34.0 + (N(rot2(0.6) * p + 17.0, 300.0).g - 0.5) * 10.0 * wob) * wob;
+  float sp = uA.x * (0.74 + 0.52 * mix(0.5, N(p + 71.0, 1700.0).b, wob));   // uneven spacing
+  return h / sp;
+}
+// < 0 inside the forest crowning each hill
+// explicit LOD: these run inside loops and branches, where implicit derivatives (and so the mip level) are undefined
+vec4 Nl(vec2 p, float scale) { return textureLod(uNoise, p / scale + uSeed, 0.0); }
+float crownOf(vec2 p, float s, float hn) {
+  float e = (Nl(p + 130.0, 560.0).g - 0.5) * 40.0 + (Nl(rot2(0.9) * p, 150.0).r - 0.5) * 12.0;
+  float ci = s + 0.62 * uA.y + e * 0.5;
+  float cn = (195.0 - hn) * 1.6 + e + (1.0 - uFree) * 500.0;
+  return min(ci, cn);
+}
+float crownAt(vec2 p) { float s = iconField(p), hn = hNoise(p, s); return crownOf(p, s, hn); }
+
+float vnoise(vec2 p) {                                              // small hash value noise (grain, never tiles)
+  vec2 i = floor(p), f = p - i; f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y);
+}
+float cov(float a, float b, float x) { return clamp(x - a + 0.5, 0.0, 1.0) * clamp(b - x + 0.5, 0.0, 1.0); }
+
+// tree crowns on a jittered grid, painted as soft dabs: rgb colour, a coverage; sh = shadow the crowns cast on the ground
+vec4 trees(vec2 p, out float sh) {
+  const float CELL = 9.0;
+  vec2 gp = floor(p / CELL);
+  float bz = -1.0, ca = 0.0; vec3 bc = vec3(0.0); sh = 0.0;
+  vec2 ps = p + normalize(LT) * 5.0;
+  // groves: neighbouring trees share a tone (dark evergreens, olive broadleaf, a pale bamboo stand)
+  vec4 gv = Nl(rot2(0.7) * p + 31.0, 900.0);
+  vec3 grove = mix(vec3(0.10, 0.20, 0.11), vec3(0.19, 0.26, 0.11), ss(0.3, 0.7, gv.r));
+  grove = mix(grove, vec3(0.07, 0.17, 0.15), ss(0.55, 0.8, gv.b) * 0.8);
+  grove = mix(grove, vec3(0.30, 0.38, 0.15), ss(0.72, 0.9, gv.g));
+  for (int j = -2; j <= 1; j++) for (int i = -2; i <= 1; i++) {      // 4x4: the shadow test point lies up-left, toward the sun
+    vec2 c = gp + vec2(i, j);
+    vec2 cs = c + uSeed * 173.0;
+    vec2 rn = h22(cs);
+    vec2 ctr = (c + 0.2 + 0.6 * rn) * CELL;
+    float dens = ss(12.0, -26.0, crownAt(ctr)) * 1.1;
+    if (h21(cs + 3.3) > dens) continue;
+    float k = h21(cs + 5.1);
+    float r = CELL * (0.52 + 0.5 * k);
+    vec2 d = p - ctr;
+    float q = dot(d, d) / (r * r);
+    q *= 1.0 + (vnoise(d * 0.55 + rn * 50.0) - 0.5) * 0.55;          // ragged dab edge
+    vec2 dq = ps - ctr; sh = max(sh, ss(1.35, 0.55, dot(dq, dq) / (r * r)));
+    if (q >= 1.1) continue;
+    float qq = min(q, 1.0);
+    float z = sqrt(1.0 - qq) * r + k * 5.0;
+    if (z <= bz) continue;
+    bz = z;
+    vec3 n3 = normalize(vec3(d / r, sqrt(1.0 - qq) * 1.5));
+    float dif = 0.5 + 0.5 * dot(n3, normalize(vec3(LT, 0.8)));       // wrapped light: soft, not a lit ball
+    vec3 base = grove * (0.8 + 0.4 * h21(cs + 9.7));
+    if (h21(cs + 2.2) > 0.985) base = vec3(0.26, 0.23, 0.12);         // a rare russet tree
+    float leaf = vnoise(p * 0.8 + rn * 40.0) * 0.6 + vnoise(p * 0.33 + rn * 9.0) * 0.4;
+    bc = base * (0.55 + 0.75 * dif * dif) * (0.82 + 0.36 * leaf);
+    bc *= 0.7 + 0.3 * ss(1.05, 0.55, q);                             // pigment gathers at the rim of each dab
+    ca = ss(1.1, 0.92, q);
+  }
+  return vec4(bc, bz > 0.0 ? ca : 0.0);
+}
+
+void main() {
+  vec2 p = fragPx();
+  float s = iconField(p), hn, hn1, hn2;
+  float hb = hBase(p, s, hn);
+  // terrace gradient: central differences over half a field cell (the icon field is bilinear on a 6 px grid,
+  // so a 1 px difference would be constant per cell and the riser widths would step)
+  const float E = 3.0;
+  float hn3, hn4;
+  float hbx = hBase(p + vec2(E, 0.0), iconField(p + vec2(E, 0.0)), hn1), hbx2 = hBase(p - vec2(E, 0.0), iconField(p - vec2(E, 0.0)), hn3);
+  float hby = hBase(p + vec2(0.0, E), iconField(p + vec2(0.0, E)), hn2), hby2 = hBase(p - vec2(0.0, E), iconField(p - vec2(0.0, E)), hn4);
+  // slope over a wide baseline: the icon field is bilinear on a 6 px grid and the noise is 8-bit, so 1 px differences are stepped
+  float hd1, hd2, hd3, hd4;
+  vec2 sl = vec2(hBase(p + vec2(9.0, 0.0), iconField(p + vec2(9.0, 0.0)), hd1) - hBase(p - vec2(9.0, 0.0), iconField(p - vec2(9.0, 0.0)), hd2),
+                 hBase(p + vec2(0.0, 9.0), iconField(p + vec2(0.0, 9.0)), hd3) - hBase(p - vec2(0.0, 9.0), iconField(p - vec2(0.0, 9.0)), hd4)) / 18.0;
+  float slope = length(sl);
+  float wob = ss(0.06, 0.4, slope);
+  float t = terr(p, hb, wob);
+  vec2 g = vec2(terr(p + vec2(E, 0.0), hbx, wob) - terr(p - vec2(E, 0.0), hbx2, wob), terr(p + vec2(0.0, E), hby, wob) - terr(p - vec2(0.0, E), hby2, wob)) / (2.0 * E);
+  float gl = max(length(g), 1e-5);
+  vec2 dn = -g / gl;                                                // downhill
+  float cr = crownOf(p, s, hn);
+  float wF = ss(50.0, 4.0, hb);                                     // flat valley floor
+
+  if (uA.w > 0.5) {                                                 // data pass for the sprites (read back once per layout)
+    float e = clamp((t + 8.0) / 64.0, 0.0, 1.0) * 255.0;
+    o = vec4(floor(e) / 255.0, fract(e), ss(6.0, -6.0, cr), wF);
+    return;
+  }
+
+  float kS = uA.z;
+  float wSp = clamp(1.0 - kS, 0.0, 1.0), wAu = clamp(kS - 1.0, 0.0, 1.0), wSu = 1.0 - wSp - wAu;
+
+  // ---- which paddy: terrace ring, cut by short cross bunds; on the valley floor a loose patchwork ----
+  float id = floor(t);
+  vec2 cq = rot2(0.3) * p + 13.0;
+  float cf = N(cq, 2600.0).a * 7.0 + h21(vec2(id, 7.0) + uSeed) * 3.0;
+  vec2 cg = vec2(N(rot2(0.3) * (p + vec2(1, 0)) + 13.0, 2600.0).a, N(rot2(0.3) * (p + vec2(0, 1)) + 13.0, 2600.0).a) * 7.0 - N(cq, 2600.0).a * 7.0;
+  float cgl = max(length(cg), 1e-5);
+  float perp = abs(dot(cg / cgl, vec2(-dn.y, dn.x)));               // cross bunds run across the terrace, not along it
+  float xc = (cf - floor(cf + 0.5)) / cgl;
+
+  float ang = uSeed * 6.2831;
+  vec2 q = rot2(ang) * p + (N(p + 40.0, 1300.0).rg - 0.5) * 90.0;
+  q.x += (N(vec2(q.x, 3.0), 800.0).g - 0.5) * 80.0;
+  float colW = 118.0;
+  float cx = floor(q.x / colW);
+  float rowH = 54.0 + 62.0 * h21(vec2(cx, 1.3) + uSeed);
+  float qy = q.y + h21(vec2(cx, 2.7) + uSeed) * 200.0;
+  float cy = floor(qy / rowH);
+  vec2 fq = vec2(q.x - cx * colW, qy - cy * rowH);
+  float split = h21(vec2(cx, cy) + uSeed * 3.0);
+  float sx = colW * (0.3 + 0.4 * h21(vec2(cy, cx) + 9.0));
+  float cellX = split < 0.4 ? floor(fq.x / sx) : 0.0;
+  float dGrid = min(min(fq.x, colW - fq.x), min(fq.y, rowH - fq.y));
+  if (split < 0.4) dGrid = min(dGrid, abs(fq.x - sx));
+  float gridOn = ss(0.35, 0.65, wF + (N(p, 700.0).b - 0.5) * 0.5);
+  float gwide = 1.0 / gl;
+  gridOn = max(gridOn, ss(150.0, 260.0, gwide));                  // a very wide step (a hill's flat top) is split into fields too
+
+  vec2 pid = gridOn > 0.5 ? vec2(cx * 7.0 + cellX + id * 131.0, cy) : vec2(id, floor(cf));
+  float r1 = h21(pid + uSeed * 13.1), r2 = h21(pid * 1.7 + 3.1 + uSeed);
+
+  // ---- position across the terrace ----
+  float u = fract(t);
+  float x = (t - floor(t + 0.5)) / gl;                              // px from the nearest riser: > 0 on the lip above it, < 0 at the foot below
+  float wt = 1.0 / gl;                                              // terrace width (px)
+  float dUp = (1.0 - u) * wt, dDn = u * wt;
+  float lines = ss(0.34, 0.18, gl) * ss(0.003, 0.008, gl);           // too dense to draw: melt; nearly flat: no line
+  float steep = 1.0 - wF;
+
+  // ---- paddy surface by season ----
+  vec4 nA = N(p, 1100.0), nB = N(rot2(1.7) * p + 9.0, 430.0);
+  float grain = vnoise(p * 0.7) * 0.6 + vnoise(p * 0.23 + 7.0) * 0.4;
+
+  // spring: mirrors of the sky
+  // the sky in the water: cool blue overhead, warming to a pale gold where the morning sun sits
+  vec2 uvs = p / uRes;
+  float warm = ss(0.55, 1.35, dot(uvs, vec2(0.5, 0.7)) + (N(p, 4200.0).b - 0.5) * 0.5) * 0.85;
+  vec3 sky = mix(vec3(0.57, 0.75, 0.91), vec3(0.99, 0.90, 0.76), warm);
+  sky = mix(sky, vec3(0.86, 0.91, 0.95), 0.45 * ss(0.3, 0.8, N(rot2(0.4) * p, 2600.0).r));
+  float bloom = N(p + vec2(r1, r2) * 700.0, 380.0).g;                  // each paddy's wash dried a little differently
+  vec3 water = sky * mix(vec3(1.0), vec3(1.03, 0.98, 0.92), r1 * 0.6) * (0.93 + 0.1 * r2) * (0.95 + 0.1 * bloom);
+  if (r1 > 0.93) water = mix(water, vec3(0.70, 0.77, 0.60), 0.55);       // a few paddies green with algae
+  else if (r1 > 0.87) water = mix(water, vec3(0.72, 0.62, 0.47), 0.5);   // or freshly ploughed, muddy
+  water = mix(water, vec3(0.36, 0.34, 0.26), exp(-dUp / 5.0) * 0.55 * steep * lines);   // the wall above, reflected
+  water *= mix(1.03, 0.92, ss(0.0, 1.0, u) * steep);                 // each step: bright at its lip, duller toward the wall above
+  water *= 1.0 - 0.07 * exp(-dDn / 3.0);                             // pigment pooling at the wash edge
+
+  // summer: green rice in rows along the terrace
+  float rowsT = 0.5 + 0.5 * cos(6.2831 * t * 7.0);
+  float rowPx = wt / 7.0;
+  float rowsG = 0.5 + 0.5 * cos(6.2831 * (mod(cx + cy, 2.0) > 0.5 ? fq.x : fq.y) / 4.0);
+  float rows = mix(rowsT * ss(2.2, 4.0, rowPx), rowsG, gridOn);
+  vec3 green = mix(vec3(0.50, 0.67, 0.21), vec3(0.29, 0.52, 0.18), r1);
+  if (r2 < 0.18) green = vec3(0.66, 0.75, 0.31);
+  green *= (0.86 + 0.24 * nB.b) * (1.0 - 0.13 * rows) * (0.93 + 0.1 * grain);
+  // autumn: ripe gold, some paddies already cut
+  vec3 gold = mix(vec3(0.90, 0.71, 0.27), vec3(0.79, 0.55, 0.19), r1);
+  if (r2 > 0.86) gold = vec3(0.70, 0.68, 0.30);
+  float cut = r2 < 0.16 ? 1.0 : 0.0;
+  gold = mix(gold, vec3(0.80, 0.68, 0.45) * (1.0 - 0.12 * rows), cut);
+  gold *= (0.88 + 0.2 * nB.b) * (1.0 - 0.11 * rows * (1.0 - cut)) * (0.93 + 0.1 * grain);
+
+  float isWaterSu = r1 < 0.06 ? 1.0 : 0.0, isWaterAu = 0.0;
+  vec3 surf = water * wSp + mix(green, water * vec3(0.88, 0.95, 0.9), isWaterSu) * wSu + mix(gold, water * vec3(0.92, 0.9, 0.84), isWaterAu) * wAu;
+  float wetness = wSp + isWaterSu * wSu + isWaterAu * wAu;
+  float riceAmt = (1.0 - isWaterSu) * wSu + (1.0 - isWaterAu) * (1.0 - cut) * wAu;
+
+  vec3 col = surf;
+
+  // ---- the riser below each terrace lip: bund, wall face, cast shadow ----
+  float face = dot(dn, normalize(LT));                               // > 0: the wall faces the sun
+  float bw = (1.3 + 0.9 * nB.r) * mix(1.0, 0.8, wF);
+  float rw = (1.0 + 2.6 * nA.b) * mix(1.0, 0.35, wF);
+  float shw = max(0.0, -face) * 9.0 * mix(1.0, 0.3, wF) + 1.5;
+  vec3 bundC = mix(vec3(0.50, 0.42, 0.28), vec3(0.36, 0.43, 0.22), ss(0.4, 0.6, nB.g)) * wSp
+             + mix(vec3(0.36, 0.50, 0.19), vec3(0.30, 0.42, 0.17), nB.g) * wSu
+             + mix(vec3(0.64, 0.53, 0.31), vec3(0.52, 0.48, 0.26), nB.g) * wAu;
+  bundC *= 0.9 + 0.25 * max(face, 0.0) + 0.1 * grain;
+  vec3 faceC = mix(vec3(0.22, 0.21, 0.14), vec3(0.62, 0.52, 0.35), ss(-0.6, 0.8, face));
+  faceC = mix(faceC, faceC * vec3(0.8, 1.05, 0.7), wSu * 0.7);
+  float shA = cov(-rw - shw, -rw, x) * (0.5 + 0.5 * ss(-rw - shw, -rw, x));
+  col *= 1.0 - 0.36 * shA * lines;
+  col = mix(col, faceC * (0.9 + 0.2 * grain), cov(-rw, 0.0, x) * lines);
+  col = mix(col, bundC, cov(0.0, bw, x) * lines);
+  float inkW = 0.55 + 0.5 * nA.r;
+  float ink = exp(-x * x / (inkW * inkW)) * ss(0.25, 0.5, nB.a + 0.2) * lines;
+  col = mix(col, vec3(0.20, 0.15, 0.10), ink * 0.55);
+
+  // occasional half-height bund inside a terrace
+  float sub = h21(vec2(id, floor(N(p, 1000.0).g * 6.0)) + uSeed * 5.0) < 0.22 ? 1.0 : 0.0;
+  float x2 = (u - 0.5) / gl;
+  col = mix(col, bundC * 0.95, cov(0.0, 1.1, x2) * sub * steep * lines);
+  col *= 1.0 - 0.18 * cov(-2.0, 0.0, x2) * sub * steep * lines * max(0.0, -face);
+
+  // cross bunds splitting a ring into paddies
+  float cOn = ss(0.55, 0.8, perp) * steep * ss(10.0, 16.0, wt) * ss(1.5, 4.0, dUp) * ss(1.5, 3.0, dDn) * lines;
+  col *= 1.0 - 0.22 * cov(0.8, 2.6, xc * sign(dot(cg, LT))) * cOn;
+  col = mix(col, bundC, cov(-0.8, 0.8, xc) * cOn);
+  col = mix(col, vec3(0.2, 0.15, 0.1), exp(-(xc + 0.9) * (xc + 0.9) / 0.25) * cOn * 0.25);
+
+  // valley floor dikes
+  float dk = gridOn * ss(4.0, 6.0, dDn) * ss(3.0, 5.0, dUp);
+  col *= 1.0 - 0.16 * ss(4.0, 1.0, dGrid) * dk;                           // the paddy darkens toward its dike
+  col = mix(col, bundC * 1.08, cov(-1.0, 1.0, dGrid - 0.4) * dk);
+  col = mix(col, vec3(0.2, 0.15, 0.1), exp(-(dGrid - 1.6) * (dGrid - 1.6) / 0.3) * dk * 0.3);
+
+  // ---- forest on the hilltops ----
+  if (cr < 26.0) {
+    float tsh;
+    vec4 tr = trees(p, tsh);
+    col *= 1.0 - 0.38 * tsh;
+    float deep = ss(-5.0, -38.0, cr);
+    vec3 under = vec3(0.07, 0.10, 0.06);
+    vec3 fc = mix(tr.rgb, tr.rgb * 0.66, deep);
+    float inForest = ss(4.0, -6.0, cr);
+    col = mix(col, under, inForest);
+    col = mix(col, fc, tr.a);
+    wetness *= 1.0 - max(tr.a, inForest);
+    riceAmt *= 1.0 - max(tr.a, inForest);
+  }
+
+  // ---- watercolour paper: wash unevenness and grain ----
+  col *= 0.95 + 0.07 * N(rot2(2.2) * p, 1900.0).a;
+  float paper = vnoise(p * 0.9 + 11.0) * 0.55 + vnoise(p * 0.31 + 5.0) * 0.45;   // cold-press grain: pigment settles in the pits
+  col *= 0.97 + 0.05 * paper;
+  col -= (1.0 - col) * col * 0.12 * (0.5 - paper);
+  col += (h21(p * 1.37 + 3.1) - 0.5) / 255.0;
+
+  float m = 0.5 + 0.5 * clamp(wetness, 0.0, 1.0) - 0.5 * clamp(riceAmt, 0.0, 1.0);
+  o = vec4(clamp(col, 0.0, 1.0), m);
+}`;
+
+/* ---------- per-frame pass: cached terrain + moving light, wind and mist ---------- */
+const MAIN_FS = TERRAIN_GLSL + `
+uniform sampler2D uCache;
+uniform vec4 uD;     // x wind phase, y mist amount, z wind strength, w cloud drift
+void main() {
+  vec2 p = fragPx();
+  vec4 c = texture(uCache, gl_FragCoord.xy / (uRes * uScale));
+  vec3 col = c.rgb;
+  float water = clamp(c.a * 2.0 - 1.0, 0.0, 1.0), rice = clamp(1.0 - 2.0 * c.a, 0.0, 1.0);
+
+  // clouds overhead: reflected in the water, their shadows sliding over the land
+  vec2 cq = p + vec2(uD.w * 9.0, uD.w * 3.0);
+  float cl = N(cq, 2600.0).b * 0.62 + N(rot2(0.5) * cq + 90.0, 900.0).r * 0.38;
+  float cloud = ss(0.50, 0.80, cl);
+  col = mix(col, vec3(0.98, 0.985, 1.0), water * cloud * 0.6);
+  vec2 sq = cq + vec2(140.0, 190.0);
+  float shc = ss(0.52, 0.78, N(sq, 2600.0).b * 0.62 + N(rot2(0.5) * sq + 90.0, 900.0).r * 0.38);
+  col *= 1.0 - 0.12 * shc;
+
+  // wind: bright waves rolling through the rice, a shiver on the water
+  vec2 wq = p - vec2(1.0, 0.4) * uD.x * 70.0;
+  float wv = N(vec2(wq.x * 0.8, wq.y * 1.3), 900.0).g * 0.6 + N(rot2(0.4) * wq, 330.0).b * 0.4;
+  col *= 1.0 + rice * (wv - 0.5) * 0.35 * uD.z;
+  col += water * vec3(0.04) * ss(0.62, 0.8, wv) * uD.z;
+
+  // valley mist in the low ground
+  float s = iconField(p), hn;
+  float hb = hBase(p, s, hn);
+  vec2 mq = p + vec2(uD.w * 14.0, -uD.w * 2.0);
+  float mn = N(vec2(mq.x * 0.55, mq.y), 1300.0).g * 0.6 + N(rot2(0.2) * mq * vec2(0.6, 1.0) + 50.0, 520.0).b * 0.4;   // stretched along the valley
+  float mist = ss(110.0, 0.0, hb + (mn - 0.4) * 150.0) * ss(0.28, 0.7, mn) * uD.y;
+  col = mix(col, vec3(0.95, 0.96, 0.965), clamp(mist * 1.1, 0.0, 0.8));
+
+  col = min(col, vec3(0.995));
+  o = vec4(finish(-log(1.0 - col) / 1.35), 1.0);
+}`;
+
+/* ---------- cached terrain management ---------- */
+const ST = { prog: null, full: null, half: null, data: null, key: '', layoutN: 0, needData: true, cur: null, ms: 0 };
+function mkTarget(w, h) {
+  gl.activeTexture(gl.TEXTURE5);                     // keep units 0-2 (noise, icon field) bound for the terrain pass
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.activeTexture(gl.TEXTURE0);
+  return { tex, fbo, w, h };
+}
+function target(name, w, h) {
+  const t = ST[name];
+  if (t && t.w === w && t.h === h) return t;
+  if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fbo); }
+  return (ST[name] = mkTarget(w, h));
+}
+let season = DEF.season;
+function renderStatic(tg, pass, now) {
+  const t0 = performance.now();
+  const U = ST.prog.U, rw = cv.width / cv._scale, rh = cv.height / cv._scale;
+  gl.useProgram(ST.prog.p);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, tg.fbo);
+  gl.viewport(0, 0, tg.w, tg.h);
+  gl.uniform1i(U.uNoise, 0); gl.uniform1i(U.uFA, 1); gl.uniform1i(U.uFB, 2);
+  gl.uniform2f(U.uRes, rw, rh);
+  gl.uniform2f(U.uGrid, Gw, Gh);
+  gl.uniform1f(U.uScale, tg.w / rw);
+  gl.uniform1f(U.uStep, STEP);
+  gl.uniform1f(U.uMix, curMix);
+  gl.uniform1f(U.uSeed, (seed % 997) / 997);
+  gl.uniform4f(U.uA, P.spacing, P.sigma, season, pass);
+  gl.uniform2f(U.uHill, HILL.x, HILL.y);
+  gl.uniform1f(U.uFree, freeK);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.useProgram(PR.p);
+  gl.viewport(0, 0, cv.width, cv.height);
+  ST.ms = performance.now() - t0;
+}
+// low-res terrain data for the sprites: terrace coordinate, forest, valley floor
+const TD = { w: 0, h: 0, k: 4, t: null, forest: null, flat: null, ok: false };
+function readData() {
+  const rw = cv.width / cv._scale, rh = cv.height / cv._scale;
+  const w = Math.ceil(rw / TD.k), h = Math.ceil(rh / TD.k);
+  const tg = target('data', w, h);
+  renderStatic(tg, 1);
+  const px = new Uint8Array(w * h * 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, tg.fbo);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  TD.w = w; TD.h = h;
+  TD.t = new Float32Array(w * h); TD.forest = new Float32Array(w * h); TD.flat = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = ((h - 1 - y) * w + x) * 4, j = y * w + x;     // readPixels rows start at the bottom
+    TD.t[j] = (px[i] + px[i + 1] / 255) / 255 * 64 - 8;
+    TD.forest[j] = px[i + 2] / 255; TD.flat[j] = px[i + 3] / 255;
+  }
+  TD.ok = true;
+}
+
+function updateCache(now) {
+  const settled = curMix >= 1 && season === P.season && freeK === freeTarget();
+  const key = [settled ? 1 : curMix.toFixed(4), fromI, toI, ST.layoutN, season.toFixed(3), P.spacing, P.sigma, seed, HILL.x, freeK.toFixed(3), cv.width, cv.height].join();
+  if (key === ST.key) return;
+  ST.key = key;
+  const tg = settled ? target('full', cv.width, cv.height) : target('half', Math.ceil(cv.width / 2), Math.ceil(cv.height / 2));
+  renderStatic(tg, 0, now);
+  ST.cur = tg;
+  if (settled) { readData(); if (typeof Life !== 'undefined') Life.onTerrain(); }
+}
+
+/* ---------- free hills: pick the noise offset so an empty desktop shows a few hills (not none, not a wall of them) ---------- */
+const HILL = { x: 0, y: 0, key: '' };
+let freeK = 1;                                        // eased towards 1 - (icons - 1) / 6
+let hillMip = null;                                   // channel a of the shared noise at mip level 3 (32x32), as the shader samples it
+function pickHills() {
+  const key = seed + ',' + W + ',' + H;
+  if (HILL.key === key) return;
+  HILL.key = key;
+  if (!hillMip) {
+    const { S, d } = makeNoiseImage(), M = 32, B = S / M;
+    hillMip = new Float32Array(M * M);
+    for (let y = 0; y < M; y++) for (let x = 0; x < M; x++) {
+      let a = 0;
+      for (let j = 0; j < B; j++) for (let i = 0; i < B; i++) a += d[((y * B + j) * S + x * B + i) * 4 + 3];
+      hillMip[y * M + x] = a / (B * B * 255);
+    }
+  }
+  const M = 32, m = (u, v) => {                       // bilinear, repeat
+    const x = u * M - 0.5, y = v * M - 0.5, ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const g = (a, b) => hillMip[(((b % M) + M) % M) * M + (((a % M) + M) % M)];
+    return lerp(lerp(g(ix, iy), g(ix + 1, iy), fx), lerp(g(ix, iy + 1), g(ix + 1, iy + 1), fx), fy);
+  };
+  const c = Math.cos(1.1), s = Math.sin(1.1), rnd = mulberry32(seed * 7 + 3);
+  let best = null, bs = 1e9;
+  for (let k = 0; k < 80; k++) {
+    const ox = rnd(), oy = rnd();
+    let hit = 0, n = 0, cx = 0, cy = 0;
+    for (let y = 20; y < H - TASKBAR; y += 40) for (let x = 20; x < W; x += 40) {
+      const v = m(x / 3400 + ox, y / 3400 + oy) * 0.78 + m((c * x + s * y) / 2300 + ox + 0.37, (-s * x + c * y) / 2300 + oy + 0.37) * 0.22;
+      n++; if (v > 0.5) { hit++; cx += x; cy += y; }
+    }
+    const f = hit / n;
+    // aim for roughly a quarter of the screen, and not only hugging an edge
+    let sc = Math.abs(f - 0.26);
+    if (hit) { cx /= hit; cy /= hit; sc += 0.15 * (Math.abs(cx / W - 0.5) + Math.abs(cy / (H - TASKBAR) - 0.5)); } else sc += 1;
+    if (sc < bs) { bs = sc; best = [ox, oy]; }
+  }
+  HILL.x = best[0]; HILL.y = best[1];
+}
+
+const freeTarget = () => 1 - clamp((activeIcons().length - 1) / 6, 0, 1);
+let windT = 0, cloudT = 0;
+boot({
+  defaults: DEF,
+  layoutKeys: ['spacing'],
+  fs: MAIN_FS,
+  init() {
+    ST.prog = program(FS_HEAD + STATIC_FS);
+    gl.useProgram(PR.p);
+    if (typeof Life !== 'undefined') Life.init();
+  },
+  onLayout() { pickHills(); ST.layoutN++; if (typeof Life !== 'undefined') Life.onLayout(); },
+  onSeed() { if (typeof Life !== 'undefined') Life.reset(); },
+  step(dt, now) {
+    const target = clamp(Math.round(P.season), 0, 2);
+    if (season !== target) { const d = target - season; season = Math.abs(d) < 0.02 ? target : season + Math.sign(d) * Math.min(Math.abs(d), dt / 1.4); }
+    const ft = freeTarget(); freeK = Math.abs(ft - freeK) < 0.01 ? ft : freeK + (ft - freeK) * Math.min(1, dt * 1.5);
+    windT += dt * (0.3 + 0.7 * P.wind);
+    cloudT += dt * (0.4 + 0.6 * P.wind);
+    if (typeof Life !== 'undefined') Life.step(dt, now);
+  },
+  uniforms(U, now) {
+    updateCache(now);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, ST.cur.tex); gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U.uCache, 4);
+    gl.uniform4f(U.uA, P.spacing, P.sigma, season, 0);
+    gl.uniform2f(U.uHill, HILL.x, HILL.y);
+    gl.uniform4f(U.uD, windT, P.mist, Math.min(P.wind, 1.6), cloudT);
+  },
+  after(now) { if (typeof Life !== 'undefined') Life.draw(now); },
+});
+// debug / test hooks: ?layout=0|1|2 picks a demo layout, ?season=1 etc. sets a parameter, ?seed=n fixes the valley
+if (QS.has('seed')) reseed(+QS.get('seed'));
+for (const k in DEF) if (QS.has(k)) { P[k] = +QS.get(k); if (k === 'season') season = P[k]; }
+if (QS.has('layout')) setTimeout(() => { const L = +QS.get('layout'); if (L < 0) { icons.forEach(ic => ic.el.remove()); icons = []; commit(true); } else demoApply(L); if (QS.has('instant')) { morphT0 = -1e9; freeK = freeTarget(); } }, 0);
+else if (QS.has('instant')) setTimeout(() => { morphT0 = -1e9; freeK = freeTarget(); }, 0);
+window.__dbg && (window.__dbg.staticMs = () => { const px = new Uint8Array(4), a = performance.now(); renderStatic(target('full', cv.width, cv.height), 0); gl.bindFramebuffer(gl.FRAMEBUFFER, ST.full.fbo); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); gl.bindFramebuffer(gl.FRAMEBUFFER, null); return +(performance.now() - a).toFixed(1); });
+if (QS.has('probe')) setTimeout(() => { const t = ST.cur, px = new Uint8Array(4); gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo); gl.readPixels(t.w >> 1, t.h >> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); gl.bindFramebuffer(gl.FRAMEBUFFER, null); console.error('probe', W, H, innerWidth, innerHeight, cv.width, cv.height, JSON.stringify(cv.getBoundingClientRect()), t.w, t.h, px.join(','), gl.getError(), gl.checkFramebufferStatus ? 'x' : '', TD.ok, ST.ms, JSON.stringify(Life.dbg()), 'static', window.__dbg.staticMs(), 'frame', JSON.stringify(window.__dbg.bench())); }, +(QS.get("probe") || 1500));
+</script>
+<script src="share.js"></script>
+</body>
+</html>
