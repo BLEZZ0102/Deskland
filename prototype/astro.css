@@ -1,0 +1,38 @@
+/* Deskland · astronomy themes — shared page styles (wallpaper / preview / browser demo) */
+:root { --taskbar: 48px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #03040a; }
+body { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif; }
+#art { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+#desktop { position: fixed; left: 0; top: 0; right: 0; bottom: var(--taskbar); }
+.icon { position: absolute; width: 76px; padding: 4px 2px 5px; display: flex; flex-direction: column; align-items: center;
+  border: 1px solid transparent; border-radius: 4px; user-select: none; touch-action: none; cursor: default; }
+.icon:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); }
+.icon.sel { background: rgba(0,120,215,.34); border-color: rgba(140,200,255,.7); }
+.icon.drag { opacity: .88; z-index: 10; transform: scale(1.04); }
+.icon.settle { transition: left .22s cubic-bezier(.2,.8,.3,1), top .22s cubic-bezier(.2,.8,.3,1); }
+.glyph { width: 48px; height: 48px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); pointer-events: none; }
+.glyph svg { width: 100%; height: 100%; display: block; }
+.label { margin-top: 3px; max-width: 72px; font-size: 12px; line-height: 15px; color: #fff; text-align: center;
+  text-shadow: 0 0 2px rgba(0,0,0,.95), 0 1px 3px rgba(0,0,0,.85); word-break: break-all; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; pointer-events: none; }
+#taskbar { position: fixed; left: 0; right: 0; bottom: 0; height: var(--taskbar); background: rgba(18,20,28,.62);
+  backdrop-filter: blur(28px) saturate(1.6); -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  border-top: 1px solid rgba(255,255,255,.08); z-index: 40; }
+#clock { position: absolute; right: 14px; top: 8px; color: #fff; font-size: 12px; line-height: 16px; text-align: right; }
+#demobar { position: fixed; left: 50%; bottom: 7px; transform: translateX(-50%); z-index: 50; display: flex; gap: 6px; align-items: center;
+  color: #dfe6ff; font-size: 12px; }
+#demobar.hidden { display: none; }
+#demobar button { font: inherit; color: inherit; cursor: pointer; padding: 7px 12px; border-radius: 8px;
+  background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14); white-space: nowrap; }
+#demobar button:hover { background: rgba(255,255,255,.2); }
+/* wallpaper mode: Windows draws the real icons and taskbar */
+body.wall #taskbar, body.wall #desktop, body.wall #demobar { display: none; }
+/* preview mode (settings window): translucent blocks mark the real icon positions */
+#ghosts { position: fixed; inset: 0; pointer-events: none; display: none; }
+body.preview #ghosts { display: block; }
+.ghost { position: absolute; }
+.ghost i { position: absolute; left: 50%; top: 4px; width: 48px; height: 48px; margin-left: -24px; border-radius: 9px;
+  background: rgba(255,255,255,.86); box-shadow: 0 3px 8px rgba(0,0,0,.4); }
+.ghost b { position: absolute; left: 14%; right: 14%; top: 60px; height: 10px; border-radius: 5px; background: rgba(255,255,255,.72); }
+#nogl { position: fixed; inset: 0; display: none; place-items: center; color: #fff; font-size: 16px; }

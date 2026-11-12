@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskland · Galaxy</title>
+<!--
+  Deskland · Galaxy theme (deep field; WebGL2, drawn every frame)
+  - A spiral galaxy settles into the largest empty area of the desktop: its size, tilt and orientation follow the shape of that free space
+  - Smaller companion galaxies take the next free spots; move icons and everything glides to a new place
+  License: GPL-3.0, same as Deskland.
+-->
+<link rel="stylesheet" href="astro.css">
+</head>
+<body>
+<canvas id="art"></canvas>
+<div id="desktop"></div>
+<div id="taskbar"><div id="clock"></div></div>
+<div id="demobar"><button data-a="layout">Change layout</button><button data-a="add">+ Icon</button><button data-a="seed">New sky</button></div>
+<div id="nogl">This browser does not support WebGL2.</div>
+<script src="astro-core.js"></script>
+<script>
+'use strict';
+const ARMS = [2, 3, 4];
+const gal = { x: 0, y: 0, R: 0, ang: 0.5, ratio: 0.55, tx: 0, ty: 0, tR: 0, tang: 0.5, tratio: 0.55, vis: 0, set: false };
+let comps = [];                                              // companions: current + target values, fading in and out
+const uC = new Float32Array(16), uC2 = new Float32Array(16);
+
+// how far the free space reaches from (x, y) in direction a
+function reach(x, y, a, pad) {
+  const dx = Math.cos(a), dy = Math.sin(a), maxD = Math.hypot(W, H);
+  for (let d = 0; d < maxD; d += CG) {
+    const px = x + dx * d, py = y + dy * d;
+    if (px < -0.04 * W || px > 1.04 * W || py < -0.04 * H || py > H - TASKBAR + 0.02 * H) return d;
+    if (px >= 0 && px <= W && py >= 0 && py <= H && iconDist(px, py) < pad) return d;
+  }
+  return maxD;
+}
+function placeGalaxies(fromEmpty) {
+  const rnd = mulberry32(seed + 77);
+  const pad = 14 + P.sigma * 0.35;
+  const prefer = { x: W * (0.42 + 0.16 * rnd()), y: (H - TASKBAR) * (0.42 + 0.16 * rnd()) };
+  const sp = freeSpots(1, { edge: 1.2, pad, minR: 30, prefer })[0] || { x: W / 2, y: (H - TASKBAR) / 2, r: 60 };
+  // orientation and tilt follow the shape of the free space around that spot
+  const both = a => Math.min(reach(sp.x, sp.y, a, pad), reach(sp.x, sp.y, a + Math.PI, pad));
+  let best = -1, bestA = 0;
+  const a0 = rnd() * Math.PI;                                // on an empty desktop the seed picks the direction
+  for (let i = 0; i < 18; i++) { const a = a0 + i * Math.PI / 18, e = both(a) * (1 - 0.0005 * i); if (e > best) { best = e; bestA = a; } }
+  if (gal.set && both(gal.tang) > 0.9 * best) { bestA = gal.tang; best = both(bestA); }   // keep the direction unless a clearly better one appears
+  const minor = Math.max(both(bestA + Math.PI / 2), sp.r);
+  const cap = 0.52 * Math.min(W, H - TASKBAR);
+  gal.tR = clamp(Math.min(best, cap) * P.size, 46, cap * 1.35);
+  gal.tratio = clamp(minor / Math.max(Math.min(best, cap), 1) * 0.95, 0.30, 0.66);
+  gal.tx = sp.x; gal.ty = sp.y;
+  // shortest way round (the disc looks the same turned by half a circle)
+  let da = (bestA - gal.ang) % Math.PI; if (da > Math.PI / 2) da -= Math.PI; if (da < -Math.PI / 2) da += Math.PI;
+  gal.tang = gal.ang + da;
+  if (!gal.set || fromEmpty) { gal.x = gal.tx; gal.y = gal.ty; gal.R = gal.tR; gal.ang = gal.tang; gal.ratio = gal.tratio; gal.vis = 0; gal.set = true; }
+
+  // companions take the next free spots, away from the main disc
+  const want = clamp(Math.round(P.companions), 0, 4);
+  const spots = want ? freeSpots(want, { edge: 1.6, pad: pad + 6, minR: 34, sep: 1.5, blocked: [{ x: sp.x, y: sp.y, r: gal.tR * 1.2 }], prefer: { x: W - prefer.x, y: H - TASKBAR - prefer.y } }) : [];
+  for (const c of comps) c.used = false;
+  for (const s of spots) {
+    const tr = Math.min(s.r * 0.78, gal.tR * 0.34, 130);
+    let c = null, bd = 1e9;
+    for (const o of comps) if (!o.used && !o.dying) { const d = Math.hypot(o.tx - s.x, o.ty - s.y); if (d < bd) { bd = d; c = o; } }
+    if (!c) {
+      c = { x: s.x, y: s.y, r: tr, a: 0, ang: rnd() * Math.PI, ratio: 0.38 + 0.5 * rnd(), kind: rnd() < 0.6 ? 1 : 0, ph: rnd() };
+      comps.push(c);
+    }
+    c.used = true; c.dying = false; c.tx = s.x; c.ty = s.y; c.tr = tr;
+    if (fromEmpty) { c.x = s.x; c.y = s.y; c.r = tr; c.a = 0; }
+  }
+  for (const c of comps) if (!c.used) c.dying = true;
+}
+
+boot({
+  defaults: { sigma: 70, size: 1, arms: 0, flow: 1, companions: 2, stars: 0.6 },
+  layoutKeys: ['size', 'companions'],
+  fs: `
+uniform vec4 uG;        // main galaxy: x, y, radius, angle
+uniform vec4 uG2;       // axis ratio, arm count, rotation, brightness
+uniform vec4 uC[4];     // companions: x, y, radius, angle
+uniform vec4 uC2[4];    // axis ratio, kind (0 elliptical, 1 spiral), phase, brightness
+
+vec3 spiral(vec2 d, out float lum) {
+  lum = 0.0;
+  float R = uG.z, ratio = uG2.x, arms = uG2.y, rot = uG2.z;
+  vec2 l = rot2(uG.w) * d;
+  l.y /= ratio;
+  float r = length(l) / R;
+  if (r > 1.45) return vec3(0.0);
+  float th = atan(l.y, l.x);
+  vec2 lr = rot2(rot) * l / R;                               // frame that turns with the arms
+  vec4 n1 = texture(uNoise, lr * 0.55 + uSeed * 3.0);
+  vec4 n2 = texture(uNoise, lr * 1.9 + uSeed * 5.0 + 0.37);
+  vec4 n3 = texture(uNoise, lr * 6.7 + uSeed * 7.0 + 0.11);
+  float ph = arms * (th - rot - 2.3 * log(max(r, 0.04))) + (n1.r - 0.5) * 1.5;
+  float arm = pow(0.5 + 0.5 * cos(ph), 1.5 + 1.5 * r);
+  float disk = exp(-r * 1.9);
+  float edge = ss(1.35, 0.62, r);
+  float inner = ss(0.02, 0.15, r);
+  float grain = 0.80 + 0.40 * n3.b;                          // unresolved star clouds
+  float armI = disk * (0.22 + arm * (1.3 + 3.4 * n2.g * grain) * inner) * edge;
+  float lane = pow(0.5 + 0.5 * cos(ph + 1.05), 3.0) * ss(0.28, 0.60, n2.a * 0.7 + n3.g * 0.3) * ss(0.16, 0.36, r) * edge;   // dust on the inside of the arms
+  vec2 kc = lr * 15.0, kg = floor(kc), kf = fract(kc) - 0.5 - (h22(kg + uSeed * 31.0) - 0.5) * 0.6;
+  float kn = exp(-dot(kf, kf) * 60.0) * step(h21(kg + 3.3), 0.36);
+  float knots = kn * ss(0.36, 0.60, n2.r) * arm * disk * inner * edge * 7.0;                        // star-forming regions
+  vec2 lb = vec2(l.x, l.y * mix(ratio, 1.0, 0.5));
+  float rb = length(lb) / R;
+  float bulge = exp(-rb * rb * 110.0) * 2.4 + exp(-rb * 13.0) * 1.0;
+  vec3 col = mix(vec3(0.46, 0.66, 1.0), vec3(1.0, 0.88, 0.70), ss(0.5, 0.02, r)) * armI;
+  col *= 1.0 - 0.62 * lane;
+  col += vec3(1.0, 0.34, 0.52) * knots;
+  col += vec3(1.0, 0.84, 0.58) * bulge * (1.0 - 0.3 * lane);
+  col += vec3(0.40, 0.50, 0.90) * exp(-r * 2.2) * 0.08;      // faint halo
+  lum = armI * uG2.w;
+  return col * uG2.w;
+}
+vec3 companion(vec2 d, vec4 c, vec4 c2) {
+  vec2 l = rot2(c.w) * d;
+  l.y /= c2.x;
+  float r = length(l) / c.z;
+  if (r > 1.6) return vec3(0.0);
+  float core = exp(-r * r * 38.0) * 1.2 + exp(-r * 5.5) * 0.55;
+  vec3 col = vec3(1.0, 0.85, 0.66) * core;
+  if (c2.y > 0.5) {
+    float th = atan(l.y, l.x);
+    float n = texture(uNoise, l / c.z * 0.9 + c2.z).g;
+    float arm = pow(0.5 + 0.5 * cos(2.0 * (th - 2.7 * log(max(r, 0.05))) + c2.z * 6.283 + (n - 0.5) * 2.0), 2.0);
+    col = col * 0.75 + vec3(0.60, 0.73, 1.0) * exp(-r * 3.2) * (0.22 + 1.9 * arm * (0.5 + n)) * ss(1.4, 0.7, r);
+  }
+  return col * c2.w;
+}
+
+void main() {
+  vec2 p = fragPx();
+  float s = iconField(p);
+  vec4 bg = N(p, 2300.0);
+  vec3 col = vec3(0.008, 0.010, 0.024) + vec3(0.016, 0.012, 0.036) * bg.r + vec3(0.000, 0.010, 0.018) * bg.g;
+
+  float lum;
+  vec3 g = spiral(p - uG.xy, lum);
+  for (int i = 0; i < 4; i++) if (uC2[i].w > 0.001) g += companion(p - uC[i].xy, uC[i], uC2[i]);
+  // galaxies stay out of the way: their light dims inside the space kept clear around icons
+  float clear = ss(-34.0, 70.0, s);
+  g *= mix(0.16, 1.0, clear);
+
+  vec3 st = starField(p, min(lum * 3.0, 1.2) * clear);
+  col += g + st * (1.0 - 0.45 * clamp(dot(g, vec3(0.5)), 0.0, 1.0));
+  vec2 uv = p / uRes - 0.5;
+  col *= 1.0 - 0.34 * dot(uv, uv);
+  o = vec4(finish(col), 1.0);
+}`,
+  onSeed() { comps = []; gal.set = false; },
+  onLayout(fromEmpty) { placeGalaxies(fromEmpty); },
+  step(dt) {
+    const k = 1 - Math.exp(-dt * 2.4);
+    gal.x += (gal.tx - gal.x) * k; gal.y += (gal.ty - gal.y) * k; gal.R += (gal.tR - gal.R) * k;
+    gal.ang += (gal.tang - gal.ang) * k; gal.ratio += (gal.tratio - gal.ratio) * k;
+    gal.vis = Math.min(1, gal.vis + dt / 2.2);
+    for (let i = comps.length - 1; i >= 0; i--) {
+      const c = comps[i];
+      c.x += (c.tx - c.x) * k; c.y += (c.ty - c.y) * k; c.r += (c.tr - c.r) * k;
+      c.a = c.dying ? c.a - dt / 0.9 : Math.min(1, c.a + dt / 1.6);
+      if (c.a <= 0 && c.dying) comps.splice(i, 1);
+    }
+  },
+  uniforms(U) {
+    const v = gal.vis * gal.vis * (3 - 2 * gal.vis);
+    gl.uniform4f(U.uG, gal.x, gal.y, gal.R, gal.ang);
+    gl.uniform4f(U.uG2, gal.ratio, ARMS[clamp(Math.round(P.arms), 0, 2)], -flowT * 0.012, v);
+    uC.fill(0); uC2.fill(0);
+    comps.slice(0, 4).forEach((c, i) => {
+      uC.set([c.x, c.y, c.r, c.ang], i * 4);
+      uC2.set([c.ratio, c.kind, c.ph, Math.max(0, c.a) * 0.9], i * 4);
+    });
+    gl.uniform4fv(U.uC, uC); gl.uniform4fv(U.uC2, uC2);
+  },
+});
+</script>
+<script src="share.js"></script>
+</body>
+</html>

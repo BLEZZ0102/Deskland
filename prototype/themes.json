@@ -175,6 +175,366 @@
       ]
     },
     {
+      "id": "nebula",
+      "adaptive": true,
+      "name": "星云",
+      "desc": "图标躲在星云吹开的空腔里，四周是发光的气体、尘埃带和星星",
+      "page": "nebula.html",
+      "status": "ready",
+      "product": "free",
+      "thumb": "url(thumbs/nebula.webp?v=1) center / cover no-repeat, radial-gradient(ellipse 40% 50% at 30% 40%, #c2357a 0%, transparent 70%), radial-gradient(ellipse 36% 44% at 74% 62%, #2d55c8 0%, transparent 70%), linear-gradient(160deg, #0a0b1c 0%, #05060f 100%)",
+      "thumbSource": "custom",
+      "groups": [
+        {
+          "name": "图标周围",
+          "params": [
+            {
+              "key": "sigma",
+              "label": "空腔大小",
+              "hint": "星云在图标周围让出的暗空腔有多大",
+              "min": 40,
+              "max": 200,
+              "step": 1,
+              "default": 80,
+              "unit": "px"
+            }
+          ]
+        },
+        {
+          "name": "星云",
+          "params": [
+            {
+              "key": "density",
+              "label": "星云浓度",
+              "hint": "空旷处的气体有多浓；设为 0 只留星空",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6,
+              "format": "percent"
+            },
+            {
+              "key": "palette",
+              "label": "配色",
+              "hint": "气体的颜色",
+              "options": [
+                "船底座",
+                "礁湖",
+                "余烬"
+              ],
+              "default": 0
+            },
+            {
+              "key": "flow",
+              "label": "流动速度",
+              "hint": "气体飘移、翻涌的快慢",
+              "min": 0,
+              "max": 3,
+              "step": 0.05,
+              "default": 1,
+              "format": "times"
+            }
+          ]
+        },
+        {
+          "name": "星星",
+          "params": [
+            {
+              "key": "stars",
+              "label": "星星数量",
+              "hint": "背景星星的多少",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6,
+              "format": "percent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pillars",
+      "adaptive": true,
+      "name": "星柱",
+      "desc": "星团落在桌面最空的地方，图标藏进背光拉长的尘埃柱里，迎光的一侧镶着亮边",
+      "page": "pillars.html",
+      "status": "ready",
+      "product": "free",
+      "thumb": "url(thumbs/pillars.webp?v=1) center / cover no-repeat, radial-gradient(ellipse 30% 40% at 40% 35%, #3f8fd0 0%, transparent 72%), radial-gradient(ellipse 50% 60% at 80% 80%, #3a2410 0%, transparent 70%), linear-gradient(160deg, #0b0d1a 0%, #050508 100%)",
+      "thumbSource": "custom",
+      "groups": [
+        {
+          "name": "尘埃柱",
+          "params": [
+            {
+              "key": "sigma",
+              "label": "尘埃柱粗细",
+              "hint": "图标周围的尘埃有多厚",
+              "min": 40,
+              "max": 200,
+              "step": 1,
+              "default": 70,
+              "unit": "px"
+            },
+            {
+              "key": "length",
+              "label": "尘埃柱长度",
+              "hint": "尘埃柱背着星团拉得多长",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6,
+              "format": "percent"
+            },
+            {
+              "key": "cliffs",
+              "label": "尘埃崖壁",
+              "hint": "屏幕边缘围住气泡的尘埃有多少",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.5,
+              "format": "percent"
+            }
+          ]
+        },
+        {
+          "name": "星云",
+          "params": [
+            {
+              "key": "palette",
+              "label": "配色",
+              "hint": "气体和尘埃的颜色",
+              "options": [
+                "哈勃",
+                "韦布",
+                "氢"
+              ],
+              "default": 0
+            },
+            {
+              "key": "glow",
+              "label": "星团亮度",
+              "hint": "星团照亮气体的强弱",
+              "min": 0.3,
+              "max": 1.6,
+              "step": 0.05,
+              "default": 1,
+              "format": "times"
+            },
+            {
+              "key": "flow",
+              "label": "流动速度",
+              "hint": "气体飘移的快慢",
+              "min": 0,
+              "max": 3,
+              "step": 0.05,
+              "default": 1,
+              "format": "times"
+            }
+          ]
+        },
+        {
+          "name": "星星",
+          "params": [
+            {
+              "key": "stars",
+              "label": "星星数量",
+              "hint": "背景星星的多少",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6,
+              "format": "percent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "galaxy",
+      "adaptive": true,
+      "name": "星系",
+      "desc": "一个旋涡星系落在桌面最空的地方，大小、倾角和朝向都跟着空位变",
+      "page": "galaxy.html",
+      "status": "ready",
+      "product": "free",
+      "thumb": "url(thumbs/galaxy.webp?v=1) center / cover no-repeat, radial-gradient(ellipse 14% 18% at 50% 50%, #ffe9b8 0%, transparent 100%), radial-gradient(ellipse 46% 40% at 50% 50%, #4f76c9 0%, transparent 72%), linear-gradient(160deg, #070916 0%, #03040a 100%)",
+      "thumbSource": "custom",
+      "groups": [
+        {
+          "name": "星系",
+          "params": [
+            {
+              "key": "size",
+              "label": "星系大小",
+              "hint": "占空位的多少",
+              "min": 0.5,
+              "max": 1.3,
+              "step": 0.05,
+              "default": 1,
+              "format": "times"
+            },
+            {
+              "key": "arms",
+              "label": "旋臂",
+              "hint": "旋臂的条数",
+              "options": [
+                "2 条",
+                "3 条",
+                "4 条"
+              ],
+              "default": 0
+            },
+            {
+              "key": "flow",
+              "label": "旋转速度",
+              "hint": "星系自转的快慢",
+              "min": 0,
+              "max": 3,
+              "step": 0.05,
+              "default": 1,
+              "format": "times"
+            }
+          ]
+        },
+        {
+          "name": "周围",
+          "params": [
+            {
+              "key": "companions",
+              "label": "伴星系",
+              "hint": "其余空位里的小星系数量，设为 0 可隐藏",
+              "min": 0,
+              "max": 4,
+              "step": 1,
+              "default": 2,
+              "unit": "个"
+            },
+            {
+              "key": "sigma",
+              "label": "避让距离",
+              "hint": "星系的光离图标多远开始变暗",
+              "min": 40,
+              "max": 200,
+              "step": 1,
+              "default": 70,
+              "unit": "px"
+            },
+            {
+              "key": "stars",
+              "label": "星星数量",
+              "hint": "背景星星的多少",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6,
+              "format": "percent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nightsky",
+      "adaptive": true,
+      "name": "星空",
+      "desc": "银河穿过桌面最空的地方，星座落进空位，散落的图标连成自己的星座",
+      "page": "nightsky.html",
+      "status": "ready",
+      "product": "free",
+      "thumb": "url(thumbs/nightsky.webp?v=1) center / cover no-repeat, linear-gradient(125deg, transparent 30%, #6b6f8f 48%, #b9a98f 52%, transparent 70%), linear-gradient(180deg, #050a1e 0%, #0b1838 78%, #05070d 80%)",
+      "thumbSource": "custom",
+      "groups": [
+        {
+          "name": "银河",
+          "params": [
+            {
+              "key": "mw",
+              "label": "银河亮度",
+              "hint": "设为 0 可隐藏银河",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.75,
+              "format": "percent"
+            }
+          ]
+        },
+        {
+          "name": "星座",
+          "params": [
+            {
+              "key": "cons",
+              "label": "星座数量",
+              "hint": "落在空位里的星座，设为 0 可隐藏",
+              "min": 0,
+              "max": 6,
+              "step": 1,
+              "default": 3,
+              "unit": "个"
+            },
+            {
+              "key": "names",
+              "label": "星座名称",
+              "hint": "星座下方的名字",
+              "options": [
+                "隐藏",
+                "显示"
+              ],
+              "default": 1
+            },
+            {
+              "key": "links",
+              "label": "图标连线",
+              "hint": "把散落的图标连成它们自己的星座",
+              "options": [
+                "关闭",
+                "开启"
+              ],
+              "default": 1
+            }
+          ]
+        },
+        {
+          "name": "夜空",
+          "params": [
+            {
+              "key": "stars",
+              "label": "星星数量",
+              "hint": "背景星星的多少",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6,
+              "format": "percent"
+            },
+            {
+              "key": "meteors",
+              "label": "流星",
+              "hint": "流星出现的频率，设为 0 可关闭",
+              "min": 0,
+              "max": 3,
+              "step": 0.05,
+              "default": 1,
+              "format": "times"
+            },
+            {
+              "key": "horizon",
+              "label": "地平线",
+              "hint": "底部的远山和松树剪影",
+              "options": [
+                "隐藏",
+                "显示"
+              ],
+              "default": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "beach-turquoise",
       "name": "马尔代夫",
       "desc": "青绿色海水与浅米黄沙滩，暗色珊瑚礁间的小鱼成群游动",

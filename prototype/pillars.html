@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskland · Pillars</title>
+<!--
+  Deskland · Pillars theme (star-forming region; WebGL2, drawn every frame)
+  - A young star cluster settles into the largest empty area of the desktop and lights a glowing gas bubble
+  - Icons sit inside dark dust pillars that stretch away from the cluster; the side facing the light has a bright rim
+  - Dust cliffs close the bubble at the far edges; pillars swing round when icons or the cluster move
+  License: GPL-3.0, same as Deskland.
+-->
+<link rel="stylesheet" href="astro.css">
+</head>
+<body>
+<canvas id="art"></canvas>
+<div id="desktop"></div>
+<div id="taskbar"><div id="clock"></div></div>
+<div id="demobar"><button data-a="layout">Change layout</button><button data-a="add">+ Icon</button><button data-a="seed">New sky</button></div>
+<div id="nogl">This browser does not support WebGL2.</div>
+<script src="astro-core.js"></script>
+<script>
+'use strict';
+// Palettes: gas near the cluster, gas far from it, lit rim, dust
+const PALETTES = [
+  [[0.10, 0.46, 0.78], [0.95, 0.58, 0.20], [1.00, 0.86, 0.62], [0.17, 0.09, 0.05]],   // Hubble: teal core, gold gas
+  [[0.22, 0.38, 0.92], [0.50, 0.30, 0.72], [1.00, 0.74, 0.44], [0.40, 0.21, 0.10]],   // Webb: blue sky, tan cliffs
+  [[0.95, 0.32, 0.42], [0.55, 0.06, 0.22], [1.00, 0.76, 0.70], [0.11, 0.03, 0.05]],   // Hydrogen: red glow
+];
+const pal = PALETTES[0].map(c => c.slice());
+const star = { x: 0, y: 0, tx: 0, ty: 0, vis: 0, set: false };
+
+function placeStar(fromEmpty) {
+  const rnd = mulberry32(seed + 31);
+  const prefer = { x: W * (0.35 + 0.3 * rnd()), y: (H - TASKBAR) * (0.28 + 0.2 * rnd()) };
+  const sp = freeSpots(1, { edge: 1.3, pad: 24 + P.sigma * 0.5, minR: 20, prefer })[0] || { x: prefer.x, y: prefer.y };
+  star.tx = sp.x; star.ty = sp.y;
+  if (!star.set || fromEmpty) { star.x = sp.x; star.y = sp.y; star.vis = 0; star.set = true; }
+}
+
+boot({
+  defaults: { sigma: 70, length: 0.6, palette: 0, glow: 1, cliffs: 0.5, flow: 1, stars: 0.6 },
+  fs: `
+uniform vec4 uS;                 // cluster x, y, visibility, brightness
+uniform vec4 uK;                 // pillar length (px), bubble radius (px), drift, -
+uniform vec3 uPN, uPF, uPR, uPD; // palette: near gas, far gas, rim, dust
+
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+
+// dust pieces (signed distance, < 0 inside): x = icon heads, y = their tails trailing away from the cluster, z = bubble wall
+vec3 dustParts(vec2 p, vec2 dir, float dS, vec4 w) {
+  float L = min(uK.x, dS * 0.85);
+  float tail = 1e4;
+  for (int i = 1; i <= 4; i++) {
+    float k = float(i) / 4.0;
+    tail = min(tail, iconField(p + dir * (L * k)) - k * 22.0);   // copies shifted toward the cluster: a column that widens toward its base
+  }
+  float wob = (w.r - 0.5) * 48.0 + (w.g - 0.5) * 18.0 - 6.0;
+  return vec3(iconField(p) + wob, tail + wob, uK.y - dS + (w.b - 0.5) * 150.0 + (w.a - 0.5) * 50.0);
+}
+float dustOf(vec3 d) { return smin(min(d.x, d.y), d.z, 50.0); }
+
+void main() {
+  vec2 p = fragPx();
+  vec2 toS = uS.xy - p;
+  float dS = max(length(toS), 1.0);
+  vec2 dir = toS / dS;
+  float diag = length(uRes);
+  vec2 q = p + vec2(uK.z * 1.8, uK.z * 0.6);
+
+  vec4 n1 = N(q, 560.0), n2 = N(rot2(0.8) * q + 51.0, 150.0);
+  vec4 w = vec4(n1.r, n2.g, n1.b, n2.a);
+  vec3 dp = dustParts(p, dir, dS, w);
+  float f = dustOf(dp);
+  // one step toward the cluster: the wall gets 12 px further away, an icon head is re-sampled, tails stay put (edge-on, unlit)
+  float f2 = dustOf(vec3(iconField(p + dir * 12.0) + (dp.x - iconField(p)), dp.y, dp.z + 12.0));
+  float lit = max(clamp((f2 - f) / 12.0, -1.0, 1.0), 0.0);    // this dust surface faces the cluster
+
+  // glowing gas: thin and hot near the cluster, denser toward the walls, fading with distance from the light
+  vec4 g1 = N(q + (n1.rg - 0.5) * 120.0, 1700.0), g2 = N(rot2(-0.7) * q + 233.0, 640.0), g3 = N(rot2(2.1) * q + 17.0, 230.0);
+  float dens = g1.b * 0.5 + g2.r * 0.32 + g3.g * 0.18;
+  float rr = dS / uK.y;
+  float light = uS.w * uS.z * (0.30 + 1.4 * exp(-dS / (0.28 * diag)));
+  float gas = (pow(ss(0.12, 0.78, dens), 1.15) * 1.7 + 0.22) * mix(0.40, 1.0, ss(0.05, 1.0, rr)) * light;
+  vec3 gasCol = mix(uPN, uPF, ss(0.05, 0.85, rr + (g2.b - 0.5) * 0.5));
+  float wisp = pow(1.0 - abs(2.0 * g2.a - 1.0), 6.0);
+  vec3 neb = gasCol * gas * (1.0 + 0.3 * wisp);
+
+  // faint rays of starlight
+  float ang = atan(toS.y, toS.x);
+  float ray = texture(uNoise, vec2(ang / 6.28318 * 4.0, dS / 2600.0 - uK.z * 0.004 + uSeed)).r;
+  neb += mix(uPN, vec3(1.0), 0.4) * pow(ss(0.45, 0.9, ray), 2.0) * 0.14 * light * exp(-dS / (0.5 * diag)) * ss(10.0, 80.0, dS);
+
+  vec3 col = vec3(0.008, 0.010, 0.022) + vec3(0.010, 0.008, 0.020) * g1.r;
+  vec3 st = starField(p, 2.5 * exp(-dS / 110.0) * uS.z);
+  col += neb + st * (1.0 - 0.4 * clamp(gas, 0.0, 1.0));
+
+  // the cluster itself
+  col += vec3(0.86, 0.93, 1.0) * (exp(-dS * dS / 160.0) * 2.6 + exp(-dS / 50.0) * 0.55 + exp(-dS / 240.0) * 0.16) * uS.w * uS.z;
+
+  // dust: opaque, textured, darker toward the middle; a bright rim and a glow where it faces the light
+  float a = ss(6.0, -18.0, f);
+  float deep = ss(0.0, -150.0, f);
+  vec3 dcol = uPD * (0.45 + 0.9 * g3.r * n1.a) * (1.0 - 0.75 * deep) * (0.35 + 0.65 * min(light, 1.2));
+  dcol += uPR * 0.20 * lit * exp(f / 30.0) * light;
+  col = mix(col, dcol + st * 0.06, a);
+  float rim = exp(-abs(f + 4.0) / 5.0) * lit;
+  float halo = exp(-abs(f) / 28.0) * lit;
+  col += uPR * (rim * 1.7 + halo * 0.55) * light * (0.55 + 0.45 * n2.b);
+
+  vec2 uv = p / uRes - 0.5;
+  col *= 1.0 - 0.36 * dot(uv, uv);
+  o = vec4(finish(col), 1.0);
+}`,
+  onSeed() { star.set = false; },
+  onLayout(fromEmpty) { placeStar(fromEmpty); },
+  step(dt) {
+    const target = PALETTES[clamp(Math.round(P.palette), 0, PALETTES.length - 1)], k = 1 - Math.exp(-dt * 2.2);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) pal[i][j] += (target[i][j] - pal[i][j]) * k;
+    const m = 1 - Math.exp(-dt * 2.0);
+    star.x += (star.tx - star.x) * m; star.y += (star.ty - star.y) * m;
+    star.vis = Math.min(1, star.vis + dt / 2.0);
+  },
+  uniforms(U) {
+    const v = star.vis * star.vis * (3 - 2 * star.vis);
+    // the bubble wall sits at a share of the distance to the farthest screen corner
+    const far = Math.max(Math.hypot(star.x, star.y), Math.hypot(W - star.x, star.y), Math.hypot(star.x, H - star.y), Math.hypot(W - star.x, H - star.y));
+    gl.uniform4f(U.uS, star.x, star.y, v, P.glow);
+    gl.uniform4f(U.uK, 40 + P.length * 420, far * lerp(1.08, 0.55, clamp(P.cliffs, 0, 1)), flowT, 0);
+    gl.uniform3fv(U.uPN, pal[0]); gl.uniform3fv(U.uPF, pal[1]); gl.uniform3fv(U.uPR, pal[2]); gl.uniform3fv(U.uPD, pal[3]);
+  },
+});
+</script>
+<script src="share.js"></script>
+</body>
+</html>

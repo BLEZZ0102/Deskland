@@ -23,12 +23,21 @@ Meadow and Beach are included in Preview. Maldives is shown as a locked-theme pr
 | ![Beach theme](prototype/thumbs/beach.webp) | ![Meadow theme](prototype/thumbs/meadow.webp) |
 | Turquoise waves, kayaks, seabirds and coconut palms. | Drifting clouds and shadows, a boy flying a kite and a little black cat. |
 
+### Astronomy set
+
+| Nebula | Pillars | Galaxy | Night Sky |
+| --- | --- | --- | --- |
+| ![Nebula theme](prototype/thumbs/nebula.webp) | ![Pillars theme](prototype/thumbs/pillars.webp) | ![Galaxy theme](prototype/thumbs/galaxy.webp) | ![Night Sky theme](prototype/thumbs/nightsky.webp) |
+| Icons sit in dark cavities blown into a glowing nebula, ringed by bright gas. | A star cluster lights the emptiest area; icons sit in dust pillars that stretch away from it, rimmed with light. | A spiral galaxy settles into the largest free space and tilts to fit it, with companions in the other gaps. | The Milky Way runs through the emptiest corridor, constellations fill the free areas and stray icons link up. |
+
+All four are WebGL2 pages sharing `prototype/astro-core.js` and follow the same host contract as Beach and Meadow (icons, settings, reset, pause, share).
+
 The theme browser also shows 11 locked themes as a preview of the full Wallpaper edition. **Only names, descriptions and thumbnails are included for those themes — not their page code, parameters or implementation.**
 
 ## Features
 
 - **Adaptive scenery:** uses the real positions of desktop icons and transitions smoothly when they move.
-- **Two complete themes:** every setting for Beach and Meadow is included and saved between sessions.
+- **Six complete themes:** every setting for Beach, Meadow and the four astronomy themes is included and saved between sessions.
 - **Made for the desktop:** tray controls, startup on sign-in and automatic pause when a window is maximized or full-screen.
 - **Private sharing:** image and animation exports use sample icons and color blocks, never a screenshot of your desktop or real file names.
 - **Independent installation:** Preview uses its own install directory, settings, startup entry and instance identity, so it can coexist with other Deskland builds.
@@ -92,6 +101,8 @@ The installer targets the current user's `Programs\Deskland Preview` directory a
 | `host/` | Windows host, build scripts and application manifest |
 | `prototype/flat.html` | Beach theme |
 | `prototype/meadow.html` | Meadow theme |
+| `prototype/nebula.html`, `pillars.html`, `galaxy.html`, `nightsky.html` | Astronomy themes |
+| `prototype/astro-core.js`, `astro.css` | Shared WebGL core and styles for the astronomy themes |
 | `prototype/settings.html` | Settings interface |
 | `prototype/themes.json` | Full free-theme definitions and locked-theme display metadata |
 | `prototype/share.js` | Privacy-preserving image and animation sharing |
@@ -133,12 +144,19 @@ Deskland 是一款 Windows 自适应动态壁纸。移动、添加或删除桌�
 | ![沙滩主题](prototype/thumbs/beach.webp) | ![草地主题](prototype/thumbs/meadow.webp) |
 | 海浪、皮划艇、海鸟和椰子树。 | 漂浮的云与云影、放风筝的男孩和小黑猫。 |
 
+#### 天文系列
+
+| 星云 | 星柱 | 星系 | 星空 |
+| --- | --- | --- | --- |
+| ![星云主题](prototype/thumbs/nebula.webp) | ![星柱主题](prototype/thumbs/pillars.webp) | ![星系主题](prototype/thumbs/galaxy.webp) | ![星空主题](prototype/thumbs/nightsky.webp) |
+| 图标躲在星云吹开的暗空腔里，四周是发光的气体。 | 星团照亮最空的地方，图标藏进背光拉长、镶着亮边的尘埃柱。 | 旋涡星系落进最大的空位并顺着空位倾斜，其余空位有伴星系。 | 银河穿过最空的地带，星座落进空位，散落的图标连成星座。 |
+
 主题列表还展示另外 11 个锁定主题，帮助了解壁纸版内容。**这些锁定主题只有名称、简介和缩略图，不包含页面源码、参数或其他实现。**
 
 ### 功能
 
 - **图标自适应：**读取真实桌面图标的位置，在移动、添加或删除时平滑调整场景。
-- **两个完整主题：**沙滩和草地的全部参数均可调整并自动保存。
+- **六个完整主题：**沙滩、草地和四个天文主题的全部参数均可调整并自动保存。
 - **适合常驻桌面：**托盘控制、开机自动启动，前台窗口最大化或全屏时自动暂停。
 - **隐私分享：**图片和动画使用示例图标与名字色块，不截取桌面窗口或真实文件名。
 - **独立安装：**安装目录、用户数据、启动项和运行实例标识均独立，可与其他 Deskland 版本共存。

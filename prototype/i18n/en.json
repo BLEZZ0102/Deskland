@@ -547,6 +547,178 @@
           "unit": ""
         }
       }
+    },
+    "nebula": {
+      "name": "Nebula",
+      "desc": "Your icons sit in dark cavities blown into a glowing nebula, ringed by bright gas, dust lanes and stars",
+      "groups": [
+        "Around icons",
+        "Nebula",
+        "Stars"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Clearing size",
+          "hint": "How much dark space the nebula leaves around your icons"
+        },
+        "density": {
+          "label": "Nebula density",
+          "hint": "How much gas fills the empty areas; set to 0 to leave only stars"
+        },
+        "palette": {
+          "label": "Palette",
+          "hint": "The colours of the gas",
+          "options": [
+            "Carina",
+            "Lagoon",
+            "Ember"
+          ]
+        },
+        "flow": {
+          "label": "Drift speed",
+          "hint": "How fast the gas drifts and billows"
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        }
+      }
+    },
+    "pillars": {
+      "name": "Pillars",
+      "desc": "A young star cluster lights the emptiest part of your desktop; your icons sit in dust pillars that stretch away from it, rimmed with light",
+      "groups": [
+        "Pillars",
+        "Nebula",
+        "Stars"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Pillar width",
+          "hint": "How thick the dust is around your icons"
+        },
+        "length": {
+          "label": "Pillar length",
+          "hint": "How far the pillars stretch away from the star cluster"
+        },
+        "cliffs": {
+          "label": "Dust cliffs",
+          "hint": "How much dust closes in from the edges of the screen"
+        },
+        "palette": {
+          "label": "Palette",
+          "hint": "The colours of the gas and dust",
+          "options": [
+            "Hubble",
+            "Webb",
+            "Hydrogen"
+          ]
+        },
+        "glow": {
+          "label": "Cluster brightness",
+          "hint": "How strongly the star cluster lights the gas"
+        },
+        "flow": {
+          "label": "Drift speed",
+          "hint": "How fast the gas drifts"
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        }
+      }
+    },
+    "galaxy": {
+      "name": "Galaxy",
+      "desc": "A spiral galaxy settles into the largest empty area of your desktop; its size, tilt and direction follow the free space",
+      "groups": [
+        "Galaxy",
+        "Surroundings"
+      ],
+      "params": {
+        "size": {
+          "label": "Galaxy size",
+          "hint": "How much of the free space the galaxy fills"
+        },
+        "arms": {
+          "label": "Spiral arms",
+          "hint": "The number of spiral arms",
+          "options": [
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        "flow": {
+          "label": "Rotation speed",
+          "hint": "How fast the galaxy turns"
+        },
+        "companions": {
+          "label": "Companion galaxies",
+          "hint": "Small galaxies in the other free spots; set to 0 to hide",
+          "unit": ""
+        },
+        "sigma": {
+          "label": "Keep-clear distance",
+          "hint": "How far from your icons the galaxy's light starts to fade"
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        }
+      }
+    },
+    "nightsky": {
+      "name": "Night Sky",
+      "desc": "The Milky Way runs through the emptiest part of your desktop, constellations settle into the free areas, and stray icons link into constellations of their own",
+      "groups": [
+        "Milky Way",
+        "Constellations",
+        "Sky"
+      ],
+      "params": {
+        "mw": {
+          "label": "Milky Way brightness",
+          "hint": "Set to 0 to hide the Milky Way"
+        },
+        "cons": {
+          "label": "Constellations",
+          "hint": "Constellations placed in the free areas; set to 0 to hide",
+          "unit": ""
+        },
+        "names": {
+          "label": "Constellation names",
+          "hint": "The name under each constellation",
+          "options": [
+            "Hide",
+            "Show"
+          ]
+        },
+        "links": {
+          "label": "Icon links",
+          "hint": "Join stray icons into constellations of their own",
+          "options": [
+            "Off",
+            "On"
+          ]
+        },
+        "stars": {
+          "label": "Stars",
+          "hint": "The amount of background stars"
+        },
+        "meteors": {
+          "label": "Shooting stars",
+          "hint": "How often a shooting star appears; set to 0 to turn off"
+        },
+        "horizon": {
+          "label": "Horizon",
+          "hint": "The silhouette of hills and pines along the bottom",
+          "options": [
+            "Hide",
+            "Show"
+          ]
+        }
+      }
     }
   }
 }
