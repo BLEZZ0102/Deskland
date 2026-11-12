@@ -30,6 +30,7 @@ The theme browser also shows 11 locked themes as a preview of the full Wallpaper
 - **Adaptive scenery:** uses the real positions of desktop icons and transitions smoothly when they move.
 - **Two complete themes:** every setting for Beach and Meadow is included and saved between sessions.
 - **Made for the desktop:** tray controls, startup on sign-in and automatic pause when a window is maximized or full-screen.
+- **Auto-switch:** optionally change to a random ticked theme every few minutes or hours, or on demand with **Next Deskland theme** in the desktop right-click menu or the tray.
 - **Private sharing:** image and animation exports use sample icons and color blocks, never a screenshot of your desktop or real file names.
 - **Independent installation:** Preview uses its own install directory, settings, startup entry and instance identity, so it can coexist with other Deskland builds.
 - **English and Simplified Chinese:** no sign-in, purchase restoration, update service or store API is included.
@@ -140,6 +141,7 @@ Deskland 是一款 Windows 自适应动态壁纸。移动、添加或删除桌�
 - **图标自适应：**读取真实桌面图标的位置，在移动、添加或删除时平滑调整场景。
 - **两个完整主题：**沙滩和草地的全部参数均可调整并自动保存。
 - **适合常驻桌面：**托盘控制、开机自动启动，前台窗口最大化或全屏时自动暂停。
+- **自动换主题：**可每隔几分钟或几小时随机换成勾选的主题，也可在桌面右键菜单或托盘里选“下一个主题”立即换。
 - **隐私分享：**图片和动画使用示例图标与名字色块，不截取桌面窗口或真实文件名。
 - **独立安装：**安装目录、用户数据、启动项和运行实例标识均独立，可与其他 Deskland 版本共存。
 - **简体中文和英文：**不包含登录、购买恢复、自动更新或商店接口。
