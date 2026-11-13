@@ -2,6 +2,9 @@
 // 贴图只上传一次，人物与完整投影分别画入小纹理，再由草地合成到云层之下。
 let meadowBoyScene = null;
 const meadowBoyRunDuration=2,meadowBoyTurnDuration=.22;
+const meadowKiteShadow=[98,134];
+const meadowKiteRestHeading=-2.03;
+const meadowBoyFollowMargin={left:520,top:520,right:620,bottom:650};
 function meadowBoyTripPose(elapsed,cycles=4,duration=meadowBoyRunDuration,trip={}) {
   const ease=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
   const turn=trip.enter?0:meadowBoyTurnDuration;
@@ -99,10 +102,122 @@ function meadowBoyRunDestination(from,s,width,height,taskbar) {
   const distance=Math.min(Math.max(165,(height-taskbar)*.27),315);
   // 接近上沿就继续跑出整个人物、风筝与投影，不在边缘停成半截。
   const exit=from.y-distance<116*s+24;
-  const y=exit?-610*s-24:from.y-distance;
+  const y=exit?-meadowBoyFollowMargin.bottom*s-24:from.y-distance;
   // 保留向左斜上方的路线；窄屏接近左边时让路线变陡，避免从侧面消失。
   const x=Math.max(96*s+12,from.x-(from.y-y)*.65);
   return {x,y,exit};
+}
+function meadowBoyCursorTarget(cursor,s,width,height,taskbar) {
+  if(!cursor||!Number.isFinite(cursor.x)||!Number.isFinite(cursor.y))return null;
+  const {left,top,right,bottom}=meadowBoyFollowMargin;
+  const maxX=Math.max(96*s+12,width-right*s-12),minX=Math.min(left*s+12,maxX);
+  const maxY=Math.max(116*s+12,height-taskbar-bottom*s-12),minY=Math.min(top*s+12,maxY);
+  return {x:Math.max(minX,Math.min(maxX,cursor.x)),y:Math.max(minY,Math.min(maxY,cursor.y))};
+}
+function meadowBoyCatObstacle(cat,s) {
+  if(!cat)return null;
+  // 按整个剪影留出距离，猫伸爪时也有空隙。
+  return {x:cat.x,y:cat.y+6*s,rx:cat.size*.58+82*s+5,ry:cat.size*.58+96*s+5};
+}
+function meadowBoyCatLocal(p,cat) {
+  return {x:(p.x-cat.x)/cat.rx,y:(p.y-cat.y)/cat.ry};
+}
+function meadowBoyCatClear(a,b,radius=1) {
+  const dx=b.x-a.x,dy=b.y-a.y;
+  const t=Math.max(0,Math.min(1,-(a.x*dx+a.y*dy)/(dx*dx+dy*dy||1)));
+  return (a.x+dx*t)**2+(a.y+dy*t)**2>=radius**2-1e-6;
+}
+function meadowBoyCatRoute(from,to,cat,bounds=null,preferredSide=0) {
+  if(!cat)return {points:[to],side:0};
+  const local=p=>meadowBoyCatLocal(p,cat);
+  const world=p=>({x:cat.x+p.x*cat.rx,y:cat.y+p.y*cat.ry});
+  const a=local(from),b=local(to);
+  const aLength=Math.hypot(a.x,a.y);
+  const bLength=Math.hypot(b.x,b.y);
+  // 鼠标停在猫身上时，男孩留在猫的这一侧。
+  if(bLength<1.10){
+    if(aLength<1e-6)return {points:[from],side:0};
+    const edge=world({x:a.x*1.10/aLength,y:a.y*1.10/aLength});
+    return {points:[bounds?bounds(edge):edge],side:0};
+  }
+  if(aLength<1||meadowBoyCatClear(a,b))return {points:[to],side:0};
+  const count=12;
+  const nodes=Array.from({length:count},(_,i)=>{
+    const angle=i*Math.PI*2/count;
+    const node={x:Math.cos(angle)*1.14,y:Math.sin(angle)*1.14};
+    return local(bounds?bounds(world(node)):world(node));
+  });
+  const distance=(p,q)=>Math.hypot((p.x-q.x)*cat.rx,(p.y-q.y)*cat.ry);
+  let best=null,bestCost=Infinity;
+  for(let start=0;start<count;start++){
+    if(!meadowBoyCatClear(a,nodes[start]))continue;
+    for(const side of [-1,1]){
+      let cost=distance(a,nodes[start]),index=start;
+      const path=[];
+      for(let n=0;n<count;n++){
+        const node=nodes[index];
+        path.push(node);
+        // 选定绕行方向后给它一点优先，鼠标小幅移动时不会来回变道。
+        const total=cost+distance(node,b)+(preferredSide&&preferredSide!==side?cat.rx*.65:0);
+        if(total<bestCost&&meadowBoyCatClear(node,b)){
+          bestCost=total;best={points:[...path.map(world),to],side};
+        }
+        const next=(index+side+count)%count;
+        if(!meadowBoyCatClear(node,nodes[next]))break;
+        cost+=distance(node,nodes[next]);index=next;
+      }
+    }
+  }
+  return best||{points:[from],side:0};
+}
+function meadowBoyFollow(position,target,follow,dt,s,cat=null,bounds=null) {
+  const smooth=1-Math.exp(-dt/.24);
+  follow.x+=(target.x-follow.x)*smooth;
+  follow.y+=(target.y-follow.y)*smooth;
+  const route=meadowBoyCatRoute(position,follow,cat,bounds,follow.catSide);
+  follow.catSide=route.side;
+  const waypoint=route.points.find(p=>Math.hypot(p.x-position.x,p.y-position.y)>1)||route.points.at(-1);
+  const dx=waypoint.x-position.x,dy=waypoint.y-position.y,distance=Math.hypot(dx,dy);
+  const start=Math.max(24,76*s),stop=start*.55;
+  // 鼠标在身边小幅移动不追；起跑后减速到舒服的跟随距离。
+  const remaining=route.side?Infinity:distance;
+  if(follow.moving?remaining<=stop:remaining>=start)follow.moving=!follow.moving;
+  const maxSpeed=Math.max(48,Math.min(78,200*s));
+  const desired=follow.moving?Math.min(maxSpeed,(remaining-stop)*2.3):0;
+  const vx=distance>0?dx/distance*desired:0,vy=distance>0?dy/distance*desired:0;
+  const change=Math.hypot(vx-follow.vx,vy-follow.vy);
+  const blend=change>0?Math.min(1,(desired>0?155:220)*dt/change):0;
+  follow.vx+=(vx-follow.vx)*blend;follow.vy+=(vy-follow.vy)*blend;
+  let next={x:position.x+follow.vx*dt,y:position.y+follow.vy*dt};
+  if(bounds)next=bounds(next);
+  if(cat){
+    const a=meadowBoyCatLocal(position,cat),b=meadowBoyCatLocal(next,cat);
+    if(!meadowBoyCatClear(a,b)){
+      // 惯性可能把脚带进避让范围，沿本帧安全方向重试这一步。
+      const step=Math.min(distance,Math.hypot(follow.vx,follow.vy)*dt);
+      let safe=distance>0?{x:position.x+dx/distance*step,y:position.y+dy/distance*step}:position;
+      if(bounds)safe=bounds(safe);
+      const safeLocal=meadowBoyCatLocal(safe,cat),inside=Math.hypot(a.x,a.y)<1;
+      if(inside?Math.hypot(safeLocal.x,safeLocal.y)>Math.hypot(a.x,a.y):meadowBoyCatClear(a,safeLocal)){
+        next=safe;
+      }else next=position;
+      if(dt>0){follow.vx=(next.x-position.x)/dt;follow.vy=(next.y-position.y)/dt;}
+    }
+  }
+  const speed=Math.hypot(follow.vx,follow.vy);
+  Object.assign(position,next);
+  const running=speed>3;
+  if(speed>10){
+    // 略微抖动或横向移动时保留朝向，明显朝上才切换背面。
+    follow.back=follow.vy/speed<(follow.back?-.22:-.48);
+  }
+  const gait=Math.min(1,speed/(maxSpeed*.66));
+  if(running)follow.phase=(follow.phase+speed*dt/Math.max(27,112*s))%1;
+  else follow.phase=0;
+  const phase=follow.phase*Math.PI*2,frontRun=running&&!follow.back;
+  return {frame:3,back:running&&follow.back,frontRun,frontFrame:Math.floor(follow.phase*4),
+    lean:follow.vx/maxSpeed*.12,progress:1,running,squeeze:1,phase,gait,
+    bob:running?-(1-Math.cos(phase*2))*(frontRun?1.45:.65)*gait:0,done:false};
 }
 function meadowBoyTugPose(age) {
   const ease=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
@@ -111,13 +226,25 @@ function meadowBoyTugPose(age) {
   const pull=ease((age-.16)/.20)*(1-ease((age-.50)/.62));
   return {active:true,reach,pull};
 }
-function meadowBoyKiteReaction(reaction,dt,impulse) {
+function meadowBoyKiteReaction(reaction,dt,impulse,dx,dy) {
   // 手把线拉紧时给风筝一次冲量，弹性回复与阻尼使它摆过头后逐渐停稳。
-  reaction.vx-=100*impulse;reaction.vy-=120*impulse;reaction.spin+=2.8*impulse;
+  reaction.vx+=135*impulse*dx;reaction.vy+=135*impulse*dy;reaction.spin+=2.8*impulse;
   reaction.vx+=(-18*reaction.x-3.4*reaction.vx)*dt;
   reaction.vy+=(-22*reaction.y-4*reaction.vy)*dt;
   reaction.spin+=(-24*reaction.angle-3.8*reaction.spin)*dt;
   reaction.x+=reaction.vx*dt;reaction.y+=reaction.vy*dt;reaction.angle+=reaction.spin*dt;
+}
+function meadowKiteHeading(vx,vy) {
+  // 风筝沿跑动的反方向拖行，侧风让它偏离正后方一点。
+  return Math.atan2(-vy,-vx)-.42;
+}
+function meadowKiteBounds(x,y,angle) {
+  const c=Math.cos(angle),s=Math.sin(angle);
+  // 同时包住菱形本体和尾带摆到最外侧的位置。
+  const corners=[[-57,-76],[57,-76],[-57,176],[105,176],[105,64]];
+  const xs=corners.map(([px,py])=>x+c*px-s*py);
+  const ys=corners.map(([px,py])=>y+s*px+c*py);
+  return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
 }
 function meadowBoyWavePull(time,tug) {
   if(tug.active)return 0;
@@ -158,23 +285,25 @@ function meadowBoyPose(time,tug={active:false,reach:0,pull:0}) {
 function drawMeadowBoy(now) {
   return prepareMeadowBoy(now);
 }
-function prepareMeadowBoy(now,visible=true) {
+function prepareMeadowBoy(now,visible=true,cursor=null,cat=null) {
   if (!meadowBoyScene) meadowBoyScene = createMeadowBoyScene();
-  return meadowBoyScene.draw(now,visible);
+  return meadowBoyScene.draw(now,visible,cursor,cat);
 }
 function createMeadowBoyScene() {
   const shader = program(`#version 300 es
 precision highp float;
-uniform sampler2D uCharacter, uRunSprite;
-uniform vec2 uRes, uOffset, uKite, uBody, uLegs, uHand, uReelHand, uTug;
+uniform sampler2D uCharacter, uRunSprite, uFrontRunSprite;
+uniform vec2 uRes, uOffset, uKite, uKiteShadow, uBody, uLegs, uHand, uReelHand, uTug;
 uniform vec4 uPose, uMotion;
+uniform vec3 uFrontRun; // enabled, frame, horizontal lean
 uniform vec4 uLeftHipKnee, uRightHipKnee, uRig;
 uniform vec2 uLeftAnkle, uRightAnkle, uFootAngles;
 uniform vec2 uGround;
 uniform vec3 uContactL, uContactR;
 uniform vec3 uPlace;
-uniform float uScale, uTime, uLook, uShadow, uRunWind, uTension, uKiteRock;
-out vec4 o;
+uniform float uScale, uTime, uLook, uShadow, uRunWind, uTension, uKiteRock, uKiteAngle;
+layout(location=0) out vec4 o;
+layout(location=1) out vec4 oPerson;
 vec4 over(vec4 base, vec4 top) {
   float alpha=top.a+base.a*(1.-top.a);
   return vec4((top.rgb*top.a+base.rgb*base.a*(1.-top.a))/max(alpha,.001),alpha);
@@ -217,14 +346,10 @@ float ribbon(vec2 p,float offset,float phase) {
   float width=mix(3.4,1.6,t);
   return (1.-smoothstep(width,width+1.,abs(p.x-center)))*step(0.,p.y)*step(p.y,108.);
 }
-float kiteAngle() {
-  return -.23+sin(uTime*.7)*.09+sin(uTime*4.8+.7)*uRunWind*.24+uKiteRock;
-}
 vec4 kiteColor(vec2 p,vec2 screen) {
   vec4 result=vec4(0.);
-  float angle=kiteAngle();
   vec2 delta=p-uKite;
-  vec2 q=vec2(cos(angle)*delta.x+sin(angle)*delta.y,-sin(angle)*delta.x+cos(angle)*delta.y);
+  vec2 q=turn(delta,-uKiteAngle);
   vec2 tail=q-vec2(2.,65.);
   result=over(result,vec4(.88,.65,.37,ribbon(tail,0.,0.)));
   result=over(result,vec4(.81,.39,.30,ribbon(tail,8.,.45)));
@@ -304,6 +429,12 @@ vec4 runningBoy(vec2 p,vec4 trunk,float lod) {
   return over(over(over(legs,trunk),arm),reelArm);
 }
 vec4 characterColor(vec2 p) {
+  if(uFrontRun.x>.5){
+    p.x-=uFrontRun.z*(75.-p.y);
+    p.y-=uMotion.w;
+    vec2 cell=vec2(mod(uFrontRun.y,2.),floor(uFrontRun.y*.5));
+    return spriteColor(textureLod(uFrontRunSprite,(spriteUV(p)+cell)*.5,uShadow*2.8),p);
+  }
   p.x/=uMotion.z;
   vec2 boy=personSource(p),space=bodySpace(p);
   // 直接使用新男孩全身素材；右手本来就在画面左侧，不再镜像人物或拼旧身体。
@@ -332,37 +463,47 @@ void main() {
   vec2 personPoint=mix(p,projected,uShadow);
   vec4 person=characterColor(personPoint);
   // 风筝较高：整只风筝与三条尾带一起投影，方向和云影一致。
-  vec4 kite=kiteColor(p-uShadow*vec2(98.,134.),screen);
-  vec2 hand=uHand,attach=uKite+turn(vec2(-41.,-16.),kiteAngle());
+  vec4 kite=kiteColor(p-uShadow*uKiteShadow,screen);
+  if(uShadow>.5){
+    float contactL=(1.-smoothstep(.65,1.15,length((p-uContactL.xy)/vec2(7.,2.6))))*uContactL.z;
+    float contactR=(1.-smoothstep(.65,1.15,length((p-uContactR.xy)/vec2(7.,2.6))))*uContactR.z;
+    float silhouette=max(max(person.a,kite.a),max(contactL,contactR));
+    o=vec4(vec3(silhouette),1.);
+    return;
+  }
+  vec2 hand=uHand,attach=uKite+turn(vec2(-41.,-16.),uKiteAngle);
   vec2 control=mix(hand,attach,.5)+vec2(-13.+sin(uTime*.8)*6.,18.)*(1.-uTension*.85);
   float line=1e5;vec2 previous=hand;
   for(int i=1;i<=6;i++) {
     float t=float(i)/6.;vec2 point=mix(mix(hand,control,t),mix(control,attach,t),t);
     line=min(line,segment(p,previous,point));previous=point;
   }
-  // 线从高举的线轮伸出，经过人物前方时仍可见，避免看起来从头或脚处起线。
-  vec4 result=over(kite,person);
-  result=over(result,vec4(.94,.92,.77,(1.-smoothstep(.4,1.1,line))*.94));
-  float contactL=(1.-smoothstep(.65,1.15,length((p-uContactL.xy)/vec2(7.,2.6))))*uContactL.z;
-  float contactR=(1.-smoothstep(.65,1.15,length((p-uContactR.xy)/vec2(7.,2.6))))*uContactR.z;
-  float silhouette=max(max(person.a,kite.a),max(contactL,contactR));
-  o=mix(result,vec4(vec3(silhouette),1.),uShadow);
+  // 线从线轮伸向身后，和风筝一起被人物遮住。
+  float lineEdge=max(1.1,1./(uPlace.z*uScale));
+  vec4 stringColor=vec4(.94,.92,.77,(1.-smoothstep(.4,lineEdge,line))*.9);
+  oPerson=person;
+  o=over(over(kite,stringColor),person);
 }`);
-  const texture=gl.createTexture(),runTexture=gl.createTexture();
-  const framebuffer=gl.createFramebuffer(),layers=[gl.createTexture(),gl.createTexture()];
-  let targetWidth=0,targetHeight=0;
+  const texture=gl.createTexture(),runTexture=gl.createTexture(),frontRunTexture=gl.createTexture();
+  const framebuffer=gl.createFramebuffer(),layers=Array.from({length:3},()=>gl.createTexture());
+  let targetWidth=0,targetHeight=0,layerScale=0;
   let ready=0,position=null,target=null,signature='',lastCheck=-Infinity,previousTime=null,time=0;
-  let trip=null,nextRunAt=7,kitePosition=null,lastScale=0,returnAt=null;
+  let trip=null,nextRunAt=7,kitePosition=null,lastScale=0,returnAt=null,follow=null;
+  let kiteHeading=meadowKiteRestHeading,desiredHeading=meadowKiteRestHeading;
+  let frontReady=false;
   let nextPullAt=2.2,pullStarted=-Infinity,lastLinePull=0;
   const kiteReaction={x:0,y:0,vx:0,vy:0,angle:0,spin:0};
   const startTrip=(from,to,s,flags={})=>{
-    const distance=Math.hypot(to.x-from.x,to.y-from.y);
+    const {cat,...tripFlags}=flags;
+    const path=[{...from},...meadowBoyCatRoute(from,to,cat).points];
+    const lengths=path.slice(1).map((p,i)=>Math.hypot(p.x-path[i].x,p.y-path[i].y));
+    const distance=lengths.reduce((sum,length)=>sum+length,0);
     const cycles=Math.max(2,Math.round(distance/(s*80)));
-    return {start:time,from:{...from},to:{x:to.x,y:to.y},
+    return {start:time,to:path.at(-1),path,lengths,distance,
       // 长路程增加迈步次数，保留清楚的收腿动作，不靠加快步频赶完。
-      duration:Math.max(meadowBoyRunDuration,distance/55,cycles*.52),cycles,...flags};
+      duration:Math.max(meadowBoyRunDuration,distance/55,cycles*.52),cycles,...tripFlags};
   };
-  function loadSprite(path,unit,targetTexture,size=384){
+  function loadSprite(path,unit,targetTexture,size=384,onReady=()=>ready++){
     const image=new Image();
     image.onload=()=>{
       const sprite=document.createElement('canvas');sprite.width=sprite.height=size;
@@ -374,13 +515,14 @@ void main() {
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-      ready++;
+      onReady();
     };
     image.onerror=()=>console.warn('草地放风筝人物素材加载失败：'+path);
     image.src=path;
   }
   loadSprite('assets/meadow-kite-boy-level-face.png',gl.TEXTURE4,texture);
   loadSprite('assets/meadow-kite-boy-diagonal-run.png',gl.TEXTURE7,runTexture,768);
+  loadSprite('assets/meadow-kite-boy-front-run.png',gl.TEXTURE9,frontRunTexture,768,()=>{frontReady=true;});
   const choosePosition=(s)=>{
     let best=null,bestScore=Infinity;
     const candidates=[];
@@ -394,72 +536,122 @@ void main() {
     }
     return best||{x:W*.48,y:(H-TASKBAR)*.40};
   };
-  return {draw(now,visible=true){
+  return {draw(now,visible=true,cursor=null,cat=null){
     if(ready<2)return null;
     const dt=previousTime===null?0:Math.min(.05,Math.max(0,(now-previousTime)/1000));previousTime=now;time+=dt;
     const s=Math.max(.24,Math.min(1.25,W/1379,(H-TASKBAR)/1141))*.35;
+    const obstacle=meadowBoyCatObstacle(cat,s);
+    const clampFollow=p=>meadowBoyCursorTarget(p,s,W,H,TASKBAR);
     if(now-lastCheck>500){
       lastCheck=now;
       // 移动或增删图标不会打断人物跑步，仅在画面尺寸变化时重新定位。
       const next=[W,H,TASKBAR].join(',');
       if(signature!==next){
-        signature=next;target=choosePosition(s);
-        if(trip)trip={start:time-(meadowBoyTurnDuration+meadowBoyRunDuration),from:{...position},to:{...position},after:target};
+        signature=next;target=choosePosition(s);follow=null;
+        if(trip)trip=null;
         nextRunAt=time+7;
       }
     }
-    if(returnAt!==null){
-      if(time<returnAt)return null;
-      // 在整个画面之外换到下方，重新跑入时人物、牵线和风筝一起连续出现。
-      position={x:Math.max(96*s+12,Math.min(W*.70,W-612*s-12)),y:H+116*s+24};
-      const y=(H-TASKBAR)*.70;
-      const destination={x:Math.max(96*s+12,position.x-(position.y-y)*.65),y};
-      target={...destination};trip=startTrip(position,destination,s,{enter:true});
-      kitePosition=null;returnAt=null;pullStarted=-Infinity;lastLinePull=0;
-      Object.keys(kiteReaction).forEach(key=>kiteReaction[key]=0);
-    }
-    if(!position)position={...target};
-    if(!trip){
-      const move=1-Math.exp(-dt*.7);position.x+=(target.x-position.x)*move;position.y+=(target.y-position.y)*move;
-      if(time>=nextRunAt&&Math.hypot(position.x-target.x,position.y-target.y)<2){
-        const destination=meadowBoyRunDestination(position,s,W,H,TASKBAR);
-        trip=startTrip(position,destination,s,{exit:destination.exit});
-        pullStarted=-Infinity;
+    const cursorTarget=clampFollow(cursor);
+    let activity;
+    if(cursorTarget){
+      // 鼠标目标永远限制在屏内安全区域，不复用自动路线的 exit 语义。
+      if(returnAt!==null||!position||position.y>H||position.x<0||position.x>W){
+        position=choosePosition(s);
+        kitePosition=null;
+      }
+      if(!follow)follow={...position,vx:0,vy:0,moving:false,back:Boolean(trip),phase:0};
+      returnAt=null;trip=null;nextRunAt=time+18;
+      activity=meadowBoyFollow(position,cursorTarget,follow,dt,s,obstacle,clampFollow);
+      target={...position};
+    }else{
+      follow=null;
+      if(returnAt!==null){
+        if(time<returnAt)return null;
+        // 在整个画面之外换到下方，重新跑入时人物、牵线和风筝一起连续出现。
+        position={x:Math.max(96*s+12,Math.min(W*.70,W-612*s-12)),y:H+116*s+24};
+        const y=(H-TASKBAR)*.70;
+        const destination={x:Math.max(96*s+12,position.x-(position.y-y)*.65),y};
+        target={...destination};trip=startTrip(position,destination,s,{enter:true,cat:obstacle});
+        kitePosition=null;returnAt=null;pullStarted=-Infinity;lastLinePull=0;
+        Object.keys(kiteReaction).forEach(key=>kiteReaction[key]=0);
+      }
+      if(!position)position={...target};
+      if(!trip){
+        const move=1-Math.exp(-dt*.7);position.x+=(target.x-position.x)*move;position.y+=(target.y-position.y)*move;
+        if(time>=nextRunAt&&Math.hypot(position.x-target.x,position.y-target.y)<2){
+          const destination=meadowBoyRunDestination(position,s,W,H,TASKBAR);
+          trip=startTrip(position,destination,s,{exit:destination.exit,cat:obstacle});
+          pullStarted=-Infinity;
+        }
       }
     }
-    const activity=trip?meadowBoyTripPose(time-trip.start,trip.cycles,trip.duration,trip):meadowBoyTripPose(6);
+    if(!activity)activity=trip?meadowBoyTripPose(time-trip.start,trip.cycles,trip.duration,trip):meadowBoyTripPose(6);
+    let tripDirection;
     if(trip){
-      position.x=trip.from.x+(trip.to.x-trip.from.x)*activity.progress;
-      position.y=trip.from.y+(trip.to.y-trip.from.y)*activity.progress;
+      let left=trip.distance*activity.progress,index=0;
+      while(index<trip.lengths.length-1&&left>trip.lengths[index])left-=trip.lengths[index++];
+      const from=trip.path[index],to=trip.path[index+1];
+      const progress=trip.lengths[index]?left/trip.lengths[index]:0;
+      tripDirection={x:to.x-from.x,y:to.y-from.y};
+      position.x=from.x+tripDirection.x*progress;
+      position.y=from.y+tripDirection.y*progress;
       if(activity.done){
         if(trip.exit){trip=null;returnAt=time+6;return null;}
         target=trip.after||{...position};trip=null;nextRunAt=time+18;nextPullAt=Math.max(nextPullAt,time+2.2);
       }
     }
     const waveTime=time%9;
-    if(!trip&&!activity.back&&time>=nextPullAt&&nextRunAt-time>3.6&&(waveTime<2.8||waveTime>5)){
+    if(!trip&&!activity.running&&time>=nextPullAt&&nextRunAt-time>3.6&&(waveTime<2.8||waveTime>5)){
       pullStarted=time;nextPullAt=time+7.8;
     }
     const tug=meadowBoyTugPose(time-pullStarted);
     // 快速挥动持线手和专门拉线共用反馈，避免手先动、等下一次拉线才带动风筝。
-    const linePull=activity.back?0:Math.max(tug.pull,meadowBoyWavePull(time,tug));
-    meadowBoyKiteReaction(kiteReaction,dt,Math.max(0,linePull-lastLinePull));lastLinePull=linePull;
+    const linePull=activity.back||activity.running?0:Math.max(tug.pull,meadowBoyWavePull(time,tug));
+    if(follow&&activity.running&&Math.hypot(follow.vx,follow.vy)>8){
+      desiredHeading=meadowKiteHeading(follow.vx,follow.vy);
+    }else if(tripDirection&&activity.running&&(tripDirection.x||tripDirection.y)){
+      desiredHeading=meadowKiteHeading(tripDirection.x,tripDirection.y);
+    }else if(!follow&&!trip){
+      desiredHeading=meadowKiteRestHeading;
+    }
+    // 按最短弧转向，转弯时线的另一端滞后一拍，避免风筝跳到另一边。
+    const headingError=desiredHeading-kiteHeading;
+    const turn=Math.atan2(Math.sin(headingError),Math.cos(headingError));
+    if(!kitePosition)kiteHeading=desiredHeading;
+    else kiteHeading+=turn*(1-Math.exp(-dt/.19));
+    const trailX=Math.cos(kiteHeading),trailY=Math.sin(kiteHeading);
+    meadowBoyKiteReaction(kiteReaction,dt,Math.max(0,linePull-lastLinePull),-trailX,-trailY);
+    lastLinePull=linePull;
     // 跑动时平滑加强横向摆幅，起跑、停步后逐渐恢复平时的轻摆。
-    const runWind=activity.running?Math.sin(Math.PI*activity.progress):0;
-    const gust=(Math.sin(time*4.8)*60+Math.sin(time*7.1)*8)*runWind;
-    const baseKx=215+Math.sin(time*.72)*21+Math.sin(time*1.23)*5+gust,baseKy=205+Math.sin(time*.49+.6)*10;
+    const runWind=activity.running?(follow?activity.gait*.38:Math.sin(Math.PI*activity.progress)):0;
+    const distance=266+Math.sin(time*.49+.6)*10+runWind*13;
+    const crosswind=Math.sin(time*.72)*19+Math.sin(time*4.8)*runWind*22;
+    const baseKx=trailX*distance-trailY*crosswind;
+    const baseKy=trailY*distance+trailX*crosswind;
     const desiredKite={x:position.x+baseKx*s,y:position.y+baseKy*s};
     if(!kitePosition||lastScale!==s)kitePosition={...desiredKite};lastScale=s;
-    const follow=1-Math.exp(-dt/0.23);
-    kitePosition.x+=(desiredKite.x-kitePosition.x)*follow;kitePosition.y+=(desiredKite.y-kitePosition.y)*follow;
-    // 拉紧的位移同帧传到风筝，绕开跟随位置的缓动；松手后保留弹性摆动。
-    const kx=baseKx+Math.max(-30,Math.min(32,(kitePosition.x-desiredKite.x)/s))+kiteReaction.x-linePull*10;
-    const ky=baseKy+Math.max(-30,Math.min(32,(kitePosition.y-desiredKite.y)/s))+kiteReaction.y-linePull*12;
+    const kiteFollow=1-Math.exp(-dt/.16);
+    kitePosition.x+=(desiredKite.x-kitePosition.x)*kiteFollow;
+    kitePosition.y+=(desiredKite.y-kitePosition.y)*kiteFollow;
+    // 限制松弛量，拉线时立刻把风筝拉向男孩，松手后保留弹性摆动。
+    const lagX=(kitePosition.x-desiredKite.x)/s,lagY=(kitePosition.y-desiredKite.y)/s;
+    const slack=Math.min(1,34/Math.max(1,Math.hypot(lagX,lagY)));
+    const kx=baseKx+lagX*slack+kiteReaction.x-linePull*15*trailX;
+    const ky=baseKy+lagY*slack+kiteReaction.y-linePull*15*trailY;
     const kiteRock=kiteReaction.angle+linePull*.10;
+    // 菱形的尾端朝向下风处，尾带跟着拖在风筝后面。
+    const kiteAngle=kiteHeading-Math.PI*.5+Math.sin(time*.7)*.09+Math.sin(time*4.8+.7)*runWind*.24+kiteRock;
     const pose=meadowBoyPose(time,tug);
+    const frontRun=activity.frontRun&&frontReady;
     const rig=meadowBoyRunningRig(activity);
-    const ground=meadowBoyGroundPose(activity,rig,pose);
-    if(activity.back){
+    let ground;
+    if(frontRun){
+      const x=[-.9,8.5,12.,-1.5][activity.frontFrame],y=76+activity.bob;
+      ground={line:[0,76],contacts:[[x,y,1],[x,y,0]]};
+      pose.hand=[-42+activity.lean*97,-22+activity.bob];
+      pose.reelHand=pose.hand.slice();
+    }else if(activity.back){
       // 斜背面各帧的握线手位置，连线随转身和跑步动作一起移动。
       const grip=[[44,-23],[37,-23],[49,-25],[37,-23]][activity.frame];
       const angle=activity.running?rig.reelArm:0,c=Math.cos(angle),sn=Math.sin(angle);
@@ -469,46 +661,70 @@ void main() {
     }else{
       pose.hand[0]*=activity.squeeze;pose.reelHand[0]*=activity.squeeze;
     }
-    const state={time,position:{...position},layout:signature,routeTarget:trip?trip.to:target,kite:{x:position.x+kx*s,y:position.y+ky*s},...activity,wind:runWind,runner:rig,ground,tug,linePull,kiteReaction:{...kiteReaction}};
+    if(!ground)ground=meadowBoyGroundPose(activity,rig,pose);
+    const state={time,position:{...position},layout:signature,routeTarget:trip?trip.to:target,
+      groundY:position.y+ground.line[1]*s,kite:{x:position.x+kx*s,y:position.y+ky*s},
+      ...activity,wind:runWind,runner:rig,ground,tug,linePull,kiteReaction:{...kiteReaction}};
     if(!visible)return {state};
-    const k=cv._scale,left=Math.floor((position.x-96*s)*k)-1,top=Math.floor((position.y-116*s)*k)-1;
-    const width=Math.ceil(708*s*k)+2,height=Math.ceil(726*s*k)+2;
-    if(width!==targetWidth||height!==targetHeight){
-      targetWidth=width;targetHeight=height;
+    const kiteBounds=meadowKiteBounds(kx,ky,kiteAngle);
+    const [shadowX,shadowY]=meadowKiteShadow;
+    const c=Math.cos(kiteAngle),sn=Math.sin(kiteAngle);
+    const attachX=kx-41*c+16*sn,attachY=ky-41*sn-16*c;
+    const [handX,handY]=pose.hand;
+    const regions=[
+      [[-90,20,185,230],kiteBounds.map((v,i)=>v+(i%2?shadowY:shadowX))],
+      [[-96,-110,116,94],kiteBounds,[Math.min(handX,attachX)-16,Math.min(handY,attachY)-2,
+        Math.max(handX,attachX)+2,Math.max(handY,attachY)+20]]
+    ];
+    const boxes=regions.flat();
+    const k=cv._scale;
+    const left=Math.floor((position.x+Math.min(...boxes.map(b=>b[0]))*s)*k)-2;
+    const top=Math.floor((position.y+Math.min(...boxes.map(b=>b[1]))*s)*k)-2;
+    const right=Math.ceil((position.x+Math.max(...boxes.map(b=>b[2]))*s)*k)+2;
+    const bottom=Math.ceil((position.y+Math.max(...boxes.map(b=>b[3]))*s)*k)+2;
+    const neededWidth=right-left,neededHeight=bottom-top;
+    // 只按需扩展小纹理，避免风筝摆动时每帧重分配。
+    if(layerScale!==k*s||neededWidth>targetWidth||neededHeight>targetHeight){
+      const sameScale=layerScale===k*s;
+      layerScale=k*s;
+      targetWidth=Math.max(sameScale?targetWidth:0,Math.ceil(neededWidth/64)*64);
+      targetHeight=Math.max(sameScale?targetHeight:0,Math.ceil(neededHeight/64)*64);
       gl.activeTexture(gl.TEXTURE6);
       for(const layer of layers){
         gl.bindTexture(gl.TEXTURE_2D,layer);
-        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,targetWidth,targetHeight,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
       }
     }
+    const width=targetWidth,height=targetHeight;
     gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.viewport(0,0,width,height);
     gl.useProgram(shader.p);gl.activeTexture(gl.TEXTURE4);gl.bindTexture(gl.TEXTURE_2D,texture);
     gl.activeTexture(gl.TEXTURE7);gl.bindTexture(gl.TEXTURE_2D,runTexture);gl.uniform1i(shader.U.uRunSprite,7);
+    gl.activeTexture(gl.TEXTURE9);gl.bindTexture(gl.TEXTURE_2D,frontReady?frontRunTexture:texture);gl.uniform1i(shader.U.uFrontRunSprite,9);
     gl.uniform1i(shader.U.uCharacter,4);gl.uniform2f(shader.U.uRes,width/k,height/k);
     gl.uniform2f(shader.U.uOffset,left/k,top/k);
     gl.uniform3f(shader.U.uPlace,position.x,position.y,s);gl.uniform2f(shader.U.uKite,kx,ky);
+    gl.uniform2f(shader.U.uKiteShadow,shadowX,shadowY);gl.uniform1f(shader.U.uKiteAngle,kiteAngle);
     gl.uniform4f(shader.U.uPose,pose.head,pose.nod,pose.reel,pose.pull);
     gl.uniform4f(shader.U.uMotion,activity.frame,activity.back?1:0,activity.squeeze,activity.bob);
+    gl.uniform3f(shader.U.uFrontRun,frontRun?1:0,activity.frontFrame||0,activity.lean||0);
     gl.uniform4f(shader.U.uRig,activity.running?1:0,rig.arm,rig.reelArm,0);
     gl.uniform4f(shader.U.uLeftHipKnee,...rig.left.hip,...rig.left.knee);gl.uniform2f(shader.U.uLeftAnkle,...rig.left.ankle);
     gl.uniform4f(shader.U.uRightHipKnee,...rig.right.hip,...rig.right.knee);gl.uniform2f(shader.U.uRightAnkle,...rig.right.ankle);
     gl.uniform2f(shader.U.uFootAngles,rig.left.angle,rig.right.angle);
     gl.uniform2f(shader.U.uGround,...ground.line);gl.uniform3f(shader.U.uContactL,...ground.contacts[0]);gl.uniform3f(shader.U.uContactR,...ground.contacts[1]);
     gl.uniform2f(shader.U.uBody,...pose.body);gl.uniform2f(shader.U.uLegs,...pose.legs);gl.uniform2f(shader.U.uHand,...pose.hand);
-    gl.uniform2f(shader.U.uTug,...pose.tugOffset);gl.uniform1f(shader.U.uTension,linePull);gl.uniform1f(shader.U.uKiteRock,kiteRock);
+    gl.uniform2f(shader.U.uTug,...pose.tugOffset);gl.uniform1f(shader.U.uTension,Math.max(linePull,activity.running?activity.gait*.62:0));gl.uniform1f(shader.U.uKiteRock,kiteRock);
     gl.uniform2f(shader.U.uReelHand,...pose.reelHand);gl.uniform1f(shader.U.uLook,pose.look);
     gl.uniform1f(shader.U.uScale,k);gl.uniform1f(shader.U.uTime,time);gl.uniform1f(shader.U.uRunWind,runWind);
-    const regions=[
-      [[-70,25,185,230],[105,140,612,610]],
-      [[-90,-110,116,90],[12,-35,205,260],[12,65,514,476]]
-    ];
     try{
       for(let i=0;i<2;i++){
         gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,layers[i],0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,i===1?layers[2]:null,0);
+        gl.drawBuffers(i===1?[gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]:[gl.COLOR_ATTACHMENT0]);
         gl.disable(gl.SCISSOR_TEST);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
         gl.uniform1f(shader.U.uShadow,i===0?1:0);
         gl.enable(gl.SCISSOR_TEST);
@@ -526,6 +742,6 @@ void main() {
       gl.disable(gl.SCISSOR_TEST);
       gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,cv.width,cv.height);
     }
-    return {rect:[left/k,top/k,width/k,height/k],shadow:layers[0],actor:layers[1],state};
+    return {rect:[left/k,top/k,width/k,height/k],shadow:layers[0],actor:layers[1],person:layers[2],state};
   }};
 }

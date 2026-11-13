@@ -988,13 +988,18 @@ class SettingsForm : Form
 class WallpaperForm : Form
 {
     readonly WebView2 web;
-    readonly System.Windows.Forms.Timer iconTimer, fgTimer;
+    readonly System.Windows.Forms.Timer iconTimer, fgTimer, cursorTimer;
     readonly string pageDir;
     readonly IconReader reader = new IconReader();
     Rectangle screen;
     IntPtr parentHwnd, insertAfter;
     string lastIcons = "";
     int lastPause = -1;
+    int lastCursorX, lastCursorY, lastCursorSent;
+    bool lastCursorInside;
+    bool cursorKnown;
+    bool leftDown, desktopPress;
+    Native.POINT pressPoint;
     bool manualPause, shuttingDown;
 
     public bool Fatal { get; private set; }
@@ -1029,6 +1034,9 @@ class WallpaperForm : Form
         fgTimer = new System.Windows.Forms.Timer();
         fgTimer.Interval = 500;
         fgTimer.Tick += delegate { PollForeground(); };
+        cursorTimer = new System.Windows.Forms.Timer();
+        cursorTimer.Interval = 16;
+        cursorTimer.Tick += delegate { PollCursor(); };
     }
 
     public void SetManualPause(bool v) { manualPause = v; PollForeground(); }
@@ -1124,6 +1132,7 @@ class WallpaperForm : Form
     public void LoadPage(string newPage)
     {
         page = newPage;
+        desktopPress = false;
         if (web.CoreWebView2 == null) return;
         try { web.CoreWebView2.Navigate(PageUrl); }
         catch (InvalidOperationException ex) { WebDead(ex); }
@@ -1162,11 +1171,14 @@ class WallpaperForm : Form
                 if (msg != null && msg.StartsWith("recprogress|")) { if (RecordProgress != null) RecordProgress(msg.Substring(12)); return; }
                 if (msg != null && msg.StartsWith("record|")) { OnRecord(msg); return; }
                 if (SettingsJson != null) core.PostWebMessageAsString(SettingsJson());
-                lastIcons = ""; lastPause = -1; PollIcons(); PollForeground();
+                lastIcons = ""; lastPause = -1; cursorKnown = false; desktopPress = false;
+                leftDown = (Native.GetAsyncKeyState(1) & 0x8000) != 0;
+                PollIcons(); PollForeground(); PollCursor();
             };
             core.Navigate(PageUrl);
             iconTimer.Start();
             fgTimer.Start();
+            cursorTimer.Start();
             Log.Write("WebView2 就绪：" + core.Environment.BrowserVersionString);
         }
         catch (Exception ex)
@@ -1346,6 +1358,59 @@ class WallpaperForm : Form
         Log.Write(string.Format("图标变化：{0} 个，可见={1}", rects.Count, visible));
     }
 
+    // ---------------------------------------------------------------- 鼠标位置：物理像素，相对当前壁纸屏幕左上角
+    void PollCursor()
+    {
+        if (page != "meadow.html" || web.CoreWebView2 == null) return;
+        Native.POINT p;
+        if (!Native.GetCursorPos(out p)) return;
+        bool inside = lastPause == 0 && screen.Contains(p.X, p.Y);
+        bool down = (Native.GetAsyncKeyState(1 /* VK_LBUTTON */) & 0x8000) != 0;
+        if (down != leftDown)
+        {
+            leftDown = down;
+            if (down)
+            {
+                desktopPress = inside && IsDesktopAt(p);
+                pressPoint = p;
+            }
+            else
+            {
+                if (desktopPress && inside && WithinClickDistance(p) && IsDesktopAt(p))
+                    Post(string.Format("{{\"t\":\"desktopClick\",\"x\":{0},\"y\":{1}}}", p.X - screen.X, p.Y - screen.Y));
+                desktopPress = false;
+            }
+        }
+        else if (desktopPress && (!inside || !WithinClickDistance(p))) desktopPress = false;
+        int x = p.X - screen.X, y = p.Y - screen.Y;
+        if (cursorKnown && inside == lastCursorInside && (!inside || (x == lastCursorX && y == lastCursorY))) return;
+        int now = Environment.TickCount;
+        if (cursorKnown && inside == lastCursorInside && unchecked(now - lastCursorSent) < 31) return;
+        cursorKnown = true; lastCursorInside = inside; lastCursorX = x; lastCursorY = y;
+        lastCursorSent = now;
+        Post(inside ? string.Format("{{\"t\":\"cursor\",\"v\":true,\"x\":{0},\"y\":{1}}}", x, y) : "{\"t\":\"cursor\",\"v\":false}");
+    }
+
+    bool WithinClickDistance(Native.POINT p)
+    {
+        Size drag = SystemInformation.DragSize;
+        return Math.Abs(p.X - pressPoint.X) <= Math.Max(4, drag.Width / 2)
+            && Math.Abs(p.Y - pressPoint.Y) <= Math.Max(4, drag.Height / 2);
+    }
+
+    bool IsDesktopAt(Native.POINT p)
+    {
+        // 只旁听点击；资源管理器仍收到原来的鼠标输入。应用、任务栏和桌面菜单不触发动画。
+        IntPtr hit = Native.WindowFromPoint(p);
+        if (hit == IntPtr.Zero) return false;
+        IntPtr root = Native.GetAncestor(hit, 2 /* GA_ROOT */);
+        var cls = new StringBuilder(32);
+        Native.GetClassName(root, cls, cls.Capacity);
+        string c = cls.ToString();
+        return (c == "Progman" || c == "WorkerW") && (reader.IsDesktopView(hit)
+            || hit == root || hit == parentHwnd || hit == Handle || Native.IsChild(Handle, hit));
+    }
+
     // ---------------------------------------------------------------- 最大化 / 全屏时暂停
     void PollForeground()
     {
@@ -1381,7 +1446,7 @@ class WallpaperForm : Form
     {
         if (shuttingDown) return;
         shuttingDown = true;
-        iconTimer.Stop(); fgTimer.Stop();
+        iconTimer.Stop(); fgTimer.Stop(); cursorTimer.Stop();
         reader.Dispose();
         IntPtr parent = parentHwnd;
         try { web.Dispose(); } catch { }
@@ -1395,7 +1460,7 @@ class WallpaperForm : Form
     protected override void OnHandleDestroyed(EventArgs e)
     {
         if (winEventHook != IntPtr.Zero) { Native.UnhookWinEvent(winEventHook); winEventHook = IntPtr.Zero; }
-        iconTimer.Stop(); fgTimer.Stop();
+        iconTimer.Stop(); fgTimer.Stop(); cursorTimer.Stop();
         reader.Dispose();
         base.OnHandleDestroyed(e);
     }
@@ -1405,6 +1470,12 @@ class WallpaperForm : Form
 class IconReader : IDisposable
 {
     IntPtr listView, proc, mem;
+
+    public bool IsDesktopView(IntPtr window)
+    {
+        if (listView == IntPtr.Zero) return false;
+        return window == listView || window == Native.GetAncestor(listView, 1 /* GA_PARENT */) || Native.IsChild(listView, window);
+    }
 
     static IntPtr FindListView()
     {
@@ -1502,6 +1573,11 @@ static class Native
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+    [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent, IntPtr child);
     [DllImport("user32.dll")] public static extern IntPtr SetParent(IntPtr child, IntPtr parent);
     [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int index);
     [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr h, int index, int value);

@@ -151,6 +151,7 @@
   .stage { display: flex; justify-content: center; }
   .preview { position: relative; overflow: hidden; border-radius: 16px; background: var(--panel-2); }
   .preview iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; }
+  .preview iframe.interactive { pointer-events: auto; }
   .preview-foot { margin-top: 12px; color: var(--muted); font-size: 10px; display: flex; align-items: center; gap: 6px; }
   .live-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--text); }
 
@@ -699,6 +700,7 @@ function showTheme() {
   renderControls();
   updateFoot();
   layoutPreview();
+  frame.classList.toggle('interactive',state.theme==='meadow');
   frame.src = themeById(state.theme).page + '?preview=1';
 }
 

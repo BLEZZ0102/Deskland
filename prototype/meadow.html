@@ -350,6 +350,11 @@ uniform sampler2D uCat;
 uniform vec4 uCatRect;
 uniform vec2 uCatShadow;
 uniform float uCatTail;
+uniform vec4 uCatGesture;
+#ifdef MEADOW_ACTOR
+uniform sampler2D uMeadowPerson;
+uniform bool uBoyInFront;
+#endif
 #endif
 uniform highp sampler2D uCirc;   // 云的圆（CPU 算好、按格子分好）：每格最多 CIRC_K 个，(x, y, 半径, 色调)，半径 0 = 没有了
 uniform vec2 uCGrid;             // 格子数
@@ -424,16 +429,37 @@ float grassInk(vec2 p) {
 float catTailMask(vec2 uv) {
   return smoothstep(.635,.665,uv.x)*smoothstep(.715,.75,uv.y);
 }
+vec4 catTexel(vec2 uv) {
+  vec4 texel=texture(uCat,uv);
+  vec2 edge=min(uv,1.-uv);
+  texel.a*=step(0.,min(edge.x,edge.y));
+  return texel;
+}
 vec4 catColor(vec2 uv) {
+  vec2 center=uv-vec2(.53,.59);
+  float cr=cos(uCatGesture.y),sr=sin(uCatGesture.y);
+  uv=vec2(.53,.59)+vec2(cr*center.x+sr*center.y,-sr*center.x+cr*center.y)
+    /vec2(1.+uCatGesture.x*.09,1.+uCatGesture.x*.06);
+  // 抬起靠上的前爪，腹部不跟着爪子变形。
+  float paw=1.-smoothstep(.11,.28,length(uv-vec2(.65,.39)));
+  uv+=vec2(-.33,1.)*paw*uCatGesture.z;
   vec2 pivot=vec2(.68,.73),delta=uv-pivot;
   // 尾根固定，越靠尾尖摆幅越大；只变形尾巴，身体和四肢保持原位。
   float angle=-uCatTail*smoothstep(.025,.16,length(delta));
   float c=cos(angle),s=sin(angle);
   vec2 source=pivot+vec2(c*delta.x-s*delta.y,s*delta.x+c*delta.y);
-  vec4 body=texture(uCat,uv),tail=texture(uCat,source);
+  vec4 body=catTexel(uv),tail=catTexel(source);
   body.a*=1.-catTailMask(uv);tail.a*=catTailMask(source);
   float alpha=body.a+tail.a;
   return vec4((body.rgb*body.a+tail.rgb*tail.a)/max(alpha,.001),min(alpha,1.));
+}
+float catHeart(vec2 uv, float age, float side) {
+  float t=clamp(age,0.,1.);
+  vec2 center=vec2(.40+side*(.13+t*.23),.23-t*.62);
+  vec2 q=(uv-center)/mix(.055,.102,smoothstep(0.,.20,t));
+  q.x=abs(q.x);
+  float d=min(length(q-vec2(.43,-.22))-.50,max(q.x+q.y*.92-.74,-q.y-.33));
+  return (1.-smoothstep(-.08,.10,d))*smoothstep(0.,.14,age)*(1.-smoothstep(.66,1.,age));
 }
 #endif
 
@@ -457,7 +483,6 @@ void main() {
   vec4 actor=texture(uActor,actorUV);
   float actorShadow=texture(uActorShadow,actorUV).r*inActor;
   col=mix(col,col*SHADOW,actorShadow*0.85);
-  col=mix(col,actor.rgb,actor.a*inActor);
 #endif
 
 #ifdef MEADOW_CAT
@@ -466,10 +491,27 @@ void main() {
   vec2 catShadowUV=(p-uCatShadow-uCatRect.xy)/uCatRect.zw;
   vec4 cat=catColor(catUV);
   float catShadow=catColor(catShadowUV).a;
-  float inCat=step(0.,catUV.x)*step(0.,catUV.y)*step(catUV.x,1.)*step(catUV.y,1.);
-  float inShadow=step(0.,catShadowUV.x)*step(0.,catShadowUV.y)*step(catShadowUV.x,1.)*step(catShadowUV.y,1.);
-  col=mix(col,col*SHADOW,catShadow*inShadow*.78);
-  col=mix(col,cat.rgb,cat.a*inCat);
+  col=mix(col,col*SHADOW,catShadow*.78);
+#endif
+
+#ifdef MEADOW_ACTOR
+  col=mix(col,actor.rgb,actor.a*inActor);
+#endif
+
+#ifdef MEADOW_CAT
+  vec3 catRGB=cat.rgb;
+#ifdef MEADOW_ACTOR
+  // 猫盖住远处的风筝和线，靠前的男孩只用自己的剪影遮住猫。
+  if(uBoyInFront){
+    vec4 person=texture(uMeadowPerson,actorUV);
+    catRGB=mix(catRGB,person.rgb,person.a*inActor);
+  }
+#endif
+  col=mix(col,catRGB,cat.a);
+  if(uCatGesture.w>=0.){
+    col=mix(col,vec3(.97,.58,.59),catHeart(catUV,uCatGesture.w,-1.));
+    col=mix(col,vec3(1.,.73,.61),catHeart(catUV,uCatGesture.w-.19,1.));
+  }
 #endif
 
   // ---------- 云投在草地上的影子（右下方）：一整块深绿 ----------
@@ -898,6 +940,13 @@ const T0 = performance.now();
 let lastT = 0, fpsEMA = 0, frameN = 0, frameMs = 0;
 const px = new Uint8Array(4);
 let paused = false;                              // 宿主通知：前台窗口最大化 / 全屏 → 暂停
+let hostCursor = null;                            // 宿主提供的全局鼠标位置（CSS 像素）
+let drawnMeadowCat = null;
+let lastMeadowBoy = null;
+function petAt(x,y) {
+  if(!paused&&P.showCat===1&&Number.isFinite(x)&&Number.isFinite(y)&&typeof petMeadowCat==='function')
+    petMeadowCat(drawnMeadowCat,x,y);
+}
 function frame(now) {
   requestAnimationFrame(frame);
   if (paused) { lastT = 0; return; }
@@ -914,9 +963,11 @@ function frame(now) {
 function draw(now) {
   const measure = frameN % 20 === 0, t0 = performance.now();
   // 隐藏男孩时只保留路线状态，小猫仍能独立显示并避开男孩再次出现的路线。
-  const boy=typeof prepareMeadowBoy==='function'?prepareMeadowBoy(now,P.showBoy===1):null;
+  const cat=P.showCat===1&&typeof prepareMeadowCat==='function'?prepareMeadowCat(lastMeadowBoy,now,!drawnMeadowCat):null;
+  const boy=typeof prepareMeadowBoy==='function'?prepareMeadowBoy(now,P.showBoy===1,hostCursor,cat?.state):null;
+  lastMeadowBoy=boy?{state:boy.state}:lastMeadowBoy;
   const actor=P.showBoy===1?boy:null;
-  const cat=P.showCat===1&&typeof prepareMeadowCat==='function'?prepareMeadowCat(boy,now):null;
+  drawnMeadowCat=cat;
   // 官网不加载人物脚本，沿用原来的草地着色器和开销。
   if(actor&&!actorPR)actorPR=program(FS.replace('#version 300 es','#version 300 es\n#define MEADOW_ACTOR'));
   // 两次绘制共享本帧云数据，不额外重算、上传云团。
@@ -949,6 +1000,12 @@ function draw(now) {
       gl.activeTexture(gl.TEXTURE8);gl.bindTexture(gl.TEXTURE_2D,cat.texture);gl.uniform1i(U.uCat,8);
       gl.uniform4f(U.uCatRect,...cat.rect);gl.uniform2f(U.uCatShadow,...cat.shadow);
       gl.uniform1f(U.uCatTail,cat.tail);
+      gl.uniform4f(U.uCatGesture,...cat.gesture);
+      if(actor){
+        gl.activeTexture(gl.TEXTURE10);gl.bindTexture(gl.TEXTURE_2D,actor.person);
+        gl.uniform1i(U.uMeadowPerson,10);
+        gl.uniform1i(U.uBoyInFront,actor.state.groundY>=cat.groundY?1:0);
+      }
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
@@ -1037,6 +1094,25 @@ desktop.addEventListener('pointerdown', e => {
   select(null);
   if (isWater(e.clientX, e.clientY)) addRipple(e.clientX, e.clientY);
 });
+if(!WALL){
+  const onMeadow=e=>e.target===cv||e.target===desktop;
+  let meadowPress=null;
+  addEventListener('pointerdown',e=>{
+    meadowPress=e.isPrimary&&e.button===0&&onMeadow(e)?{x:e.clientX,y:e.clientY}:null;
+  },true);
+  addEventListener('pointermove',e=>{
+    if(e.pointerType==='mouse'&&onMeadow(e)&&!e.buttons)hostCursor={x:e.clientX,y:e.clientY};
+    if(meadowPress&&Math.hypot(e.clientX-meadowPress.x,e.clientY-meadowPress.y)>6)meadowPress=null;
+  });
+  addEventListener('pointercancel',()=>{meadowPress=null;});
+  document.documentElement.addEventListener('pointerleave',()=>{hostCursor=null;});
+  addEventListener('blur',()=>{hostCursor=null;});
+  addEventListener('click',e=>{
+    if(meadowPress&&onMeadow(e)&&Math.hypot(e.clientX-meadowPress.x,e.clientY-meadowPress.y)<=6)
+      petAt(e.clientX,e.clientY);
+    meadowPress=null;
+  });
+}
 addEventListener('keydown', e => {
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
     const ic = selected; select(null); ic.el.remove(); icons = icons.filter(x => x !== ic); commit();
@@ -1079,7 +1155,7 @@ requestAnimationFrame(frame);
    托管模式：画面由外部驱动
    - 壁纸模式（?wallpaper=1）：桌面宿主 host/Deskland.exe 通过 WebView2 发消息
    - 预览模式（?preview=1）：设置窗口（settings.html）通过 iframe 的 postMessage 发消息
-   消息：icons（真实图标矩形，物理像素）/ settings（参数，部分更新）/ reset（恢复默认）/ pause
+   消息：icons / cursor / desktopClick（坐标为物理像素）/ settings / reset / pause
    ====================================================================== */
 // 应用设置：只接受面板上有的参数；云团大小要重算场
 function applySettings(v) {
@@ -1112,11 +1188,19 @@ function startHostedMode() {
   commit(true);                                   // 先是一片草地（还不知道图标在哪）
   let first = true;
   const handle = m => {
+    const k = window.devicePixelRatio || 1;
+    if (m.t === 'cursor') {
+      if (m.v === false) hostCursor = null;
+      else if (m.v === true && Number.isFinite(m.x) && Number.isFinite(m.y)) {
+        hostCursor = { x: m.x / k, y: m.y / k };
+      }
+      return;
+    }
+    if (m.t === 'desktopClick') { petAt(m.x/k,m.y/k); return; }
     if (m.t === 'pause') { paused = PREVIEW ? false : m.v; return; }
     if (m.t === 'settings') { applySettings(m.v || {}); return; }
     if (m.t === 'reset') { applySettings(Object.assign({}, DEFAULTS, m.v || {})); return; }
     if (m.t !== 'icons') return;
-    const k = window.devicePixelRatio || 1;       // 物理像素 → CSS 像素
     icons = m.vis ? m.r.map(([l, t, r, b]) => ({ x: l / k, y: t / k, w: (r - l) / k, h: (b - t) / k })) : [];
     if (PREVIEW) drawGhosts();
     iconsSeen = true;
