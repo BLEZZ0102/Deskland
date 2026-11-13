@@ -236,6 +236,144 @@
       ]
     },
     {
+      "id": "tidepools",
+      "adaptive": true,
+      "name": "Tidepools",
+      "desc": "Monterey Bay tidepools from above. Your icons sit on high granite rocks while the real tide rises and falls and waves wash over the ledges",
+      "page": "tidepools.html",
+      "status": "ready",
+      "thumb": "url(thumbs/tidepools.webp?v=bddc998141) center / cover no-repeat, radial-gradient(ellipse 40% 35% at 35% 30%, #8a7f72 0%, transparent 70%), linear-gradient(160deg, #1f6f6e 0%, #145a5f 100%)",
+      "thumbSource": "custom",
+      "groups": [
+        {
+          "name": "Around icons",
+          "params": [
+            {
+              "key": "sigma",
+              "label": "Icon rock size",
+              "hint": "How far the high rocks under your icons spread out",
+              "min": 30,
+              "max": 140,
+              "step": 1,
+              "default": 70,
+              "unit": "px"
+            }
+          ]
+        },
+        {
+          "name": "Tide and waves",
+          "params": [
+            {
+              "key": "tide",
+              "label": "Tide",
+              "hint": "Live follows the real tide at Monterey, California, as it rises and falls. Low and Mid hold the water still",
+              "options": [
+                "Low",
+                "Mid",
+                "Live"
+              ],
+              "default": 2
+            },
+            {
+              "key": "waves",
+              "label": "Waves",
+              "hint": "How often and how high waves surge in over the rocks",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.5,
+              "format": "percent"
+            }
+          ]
+        },
+        {
+          "name": "Life",
+          "params": [
+            {
+              "key": "traffic",
+              "label": "Tidepool life",
+              "hint": "How many anemones, sea stars, hermit crabs and minnows live in the pools",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.6,
+              "format": "percent"
+            },
+            {
+              "key": "gulls",
+              "label": "Seagulls",
+              "hint": "Gulls gliding overhead that sometimes land on the rocks",
+              "min": 0,
+              "max": 6,
+              "step": 1,
+              "default": 2,
+              "unit": ""
+            },
+            {
+              "key": "visitors",
+              "label": "Otters and sea lions",
+              "hint": "How often a sea otter or a sea lion comes by",
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "default": 0.35,
+              "format": "percent"
+            },
+            {
+              "key": "flow",
+              "label": "Speed",
+              "hint": "How fast everything moves. The tide always follows the clock",
+              "min": 0,
+              "max": 3,
+              "step": 0.05,
+              "default": 1,
+              "format": "times"
+            }
+          ]
+        },
+        {
+          "name": "Interaction",
+          "params": [
+            {
+              "key": "fire",
+              "label": "Double-click to splash",
+              "hint": "Double-click empty desktop to drop a pebble in the water or splash the rocks",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "default": 1
+            }
+          ]
+        },
+        {
+          "name": "Performance",
+          "params": [
+            {
+              "key": "quality",
+              "label": "Quality",
+              "hint": "Ultra renders at full screen resolution",
+              "options": [
+                "High",
+                "Ultra"
+              ],
+              "default": 1
+            },
+            {
+              "key": "fps",
+              "label": "Frame rate",
+              "hint": "60 fps is smoother and uses more power",
+              "options": [
+                "30 fps",
+                "60 fps"
+              ],
+              "default": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "meadow",
       "adaptive": true,
       "name": "Meadow",

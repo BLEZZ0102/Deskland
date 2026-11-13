@@ -27,7 +27,8 @@ const PREVIEW = QS.has('preview');    // Loaded as the live preview inside the s
 
 // Defaults must match the "galaxy" entry in themes.json
 const P = { sigma: 70, traffic: 0.6, skirmish: 0.35, flow: 1, quality: 1, fps: 1, adaptive: 1,
-  cursor: 1, fire: 1, variety: 0.5, particles: 0.5 };   // variety, particles: scene-specific extras (Cells)
+  cursor: 1, fire: 1, variety: 0.5, particles: 0.5,      // variety, particles: scene-specific extras (Cells)
+  tide: 2, waves: 0.5, gulls: 2, visitors: 0.35 };       // tide, waves, gulls, visitors: scene-specific extras (Tidepools)
 const DEFAULTS = Object.assign({}, P);
 const PARAM_KEYS = Object.keys(DEFAULTS);
 

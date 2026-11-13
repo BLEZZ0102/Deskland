@@ -20,3 +20,7 @@ The Salt Flats theme uses photographic textures from Poly Haven (https://polyhav
 
 - Poly Haven authors: Rob Tuytel, Amal Kumar, Charlotte Baglioni, Rico Cilliers, eye-candy.xyz.
 - ambientCG author: Lennart Demes.
+
+## Tidepools tide data
+
+The Tidepools theme computes the Monterey tide from the harmonic constituents that NOAA's Center for Operational Oceanographic Products and Services publishes for station 9413450 (Monterey, CA). NOAA data is a work of the United States government and is in the public domain. The theme embeds the constants and never contacts NOAA.
