@@ -417,7 +417,7 @@
         },
         "showCat": {
           "label": "Show kitten",
-          "hint": "The little black kitten resting on the grass",
+          "hint": "Click the little black kitten on the grass to see it stretch",
           "options": [
             "Hide",
             "Show"
