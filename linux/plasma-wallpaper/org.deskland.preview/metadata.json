@@ -1,0 +1,11 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Id": "org.deskland.preview",
+        "Name": "Deskland",
+        "Description": "Adaptive animated wallpaper that follows desktop icons",
+        "Icon": "preferences-desktop-wallpaper",
+        "Category": "Appearance",
+        "License": "GPL-3.0-only"
+    }
+}

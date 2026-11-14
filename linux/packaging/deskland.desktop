@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Deskland Preview
+Comment=Adaptive wallpaper that follows desktop icons
+Exec=deskland-linux
+Icon=deskland
+Terminal=false
+Categories=Utility;Graphics;
+StartupNotify=false
