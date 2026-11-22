@@ -35,7 +35,7 @@ $NsisCompiler = [IO.Path]::GetFullPath($NsisCompiler)
 $WebView2Bootstrapper = [IO.Path]::GetFullPath($WebView2Bootstrapper)
 
 # A fixed source list prevents other editions or private working files entering this package.
-# Agent instruction files (CLAUDE.md, AGENTS.md) stay out of the public source ZIP.
+# Private development notes stay out of the public source ZIP.
 $sources = @('.gitattributes', '.gitignore', 'NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md',
     'docs\images\beach.webp', 'docs\images\meadow.webp',
     'host\DesktopHost.cs', 'host\Themes.cs','host\DesklandPreview.ico', 'host\README.md', 'host\app.manifest', 'host\build.ps1', 'host\inspect.ps1',
