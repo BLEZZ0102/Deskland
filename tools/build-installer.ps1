@@ -35,12 +35,14 @@ $NsisCompiler = [IO.Path]::GetFullPath($NsisCompiler)
 $WebView2Bootstrapper = [IO.Path]::GetFullPath($WebView2Bootstrapper)
 
 # A fixed source list prevents other editions or private working files entering this package.
-$sources = @('.gitattributes', '.gitignore', 'AGENTS.md', 'CLAUDE.md', 'NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md',
-    'host\DesktopHost.cs', 'host\DesklandPreview.ico', 'host\README.md', 'host\app.manifest', 'host\build.ps1', 'host\inspect.ps1',
+# Agent instruction files (CLAUDE.md, AGENTS.md) stay out of the public source ZIP.
+$sources = @('.gitattributes', '.gitignore', 'NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md',
+    'docs\images\beach.webp', 'docs\images\meadow.webp',
+    'host\DesktopHost.cs', 'host\Themes.cs','host\DesklandPreview.ico', 'host\README.md', 'host\app.manifest', 'host\build.ps1', 'host\inspect.ps1',
     'tools\build-installer.ps1', 'tools\installer.nsi', 'tools\version.json')
 $themeFiles = @('flat.html', 'meadow.html', 'settings.html', 'thumbs-data.js', 'share.js', 'serve.mjs', 'themes.json', 'beach-palms.js', 'meadow-boy.js', 'meadow-cat.js',
-    'scene-core.js', 'saltflats.html', 'saltflats-scene.js', 'cells.html', 'cells-scene.js', 'tidepools.html', 'tidepools-scene.js',
-    'i18n\en.json','thumbs\beach.webp', 'thumbs\meadow.webp', 'thumbs\saltflats.webp', 'thumbs\cells.webp', 'thumbs\tidepools.webp',
+    'scene-core.js', 'saltflats.html', 'saltflats-scene.js', 'cells.html', 'cells-scene.js',
+    'i18n\en.json','thumbs\beach.webp', 'thumbs\meadow.webp', 'thumbs\saltflats.webp', 'thumbs\cells.webp',
     'assets\beach-coconut-palm-v2.png', 'assets\beach-coconut-palm-curved.png', 'assets\beach-coconut-palm-airy.png', 'assets\beach-coconut-palm-windswept.png', 'assets\beach-coconut-palm-arch.png',
     'assets\meadow-black-kitten.png', 'assets\meadow-kite-boy-level-face.png', 'assets\meadow-kite-boy-diagonal-run.png')
 # Salt Flats scene textures and their credits: every file under prototype\assets\saltflats
