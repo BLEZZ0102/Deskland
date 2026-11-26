@@ -106,7 +106,19 @@
     "purchaseTheme": "“{name}”是壁纸版主题。",
     "purchaseMessage": "体验版可永久使用沙滩和草地。壁纸版可解锁更多主题，并在同一个 Deskland 中使用。",
     "purchaseLater": "继续体验",
-    "purchaseWebsite": "前往官网"
+    "purchaseWebsite": "前往官网",
+    "rotate": "自动换主题",
+    "rotateTitle": "定时随机换成勾选的主题",
+    "rotateEvery": "每隔",
+    "unitMin": "分钟",
+    "unitHour": "小时",
+    "rotatePick": "加入自动换主题和“下一个主题”",
+    "rotatePickMore": "在下方勾选至少两个主题",
+    "rotateNext": "{n} 个主题 · {time}后切换",
+    "durSoon": "不到 1 分钟",
+    "durMin": "{m} 分钟",
+    "durHour": "{h} 小时",
+    "durHourMin": "{h} 小时 {m} 分钟"
   },
   "host": {
     "traySettings": "设置…",
@@ -130,6 +142,8 @@
     "errSettings": "设置窗口启动失败：{msg}",
     "errNoPage": "找不到页面：{path}",
     "errNoDesktop": "没有找到桌面窗口，无法挂载到壁纸层。",
-    "errStart": "启动失败：{msg}"
+    "errStart": "启动失败：{msg}",
+    "trayNext": "下一个主题",
+    "ctxNext": "下一个 Deskland 主题"
   }
 }

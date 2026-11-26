@@ -30,6 +30,7 @@ static class Program
     public static readonly string ExitEventName = "DesklandHost_Exit" + InstallProfile.Suffix;
     public static readonly string MenuEventName = "DesklandHost_Menu" + InstallProfile.Suffix;
     public static readonly string SettingsEventName = "DesklandHost_Settings" + InstallProfile.Suffix;
+    public static readonly string NextEventName = "DesklandHost_Next" + InstallProfile.Suffix;
 
     // 通知正在运行的实例（退出 / 弹出菜单）
     static void Signal(string name)
@@ -48,6 +49,8 @@ static class Program
         if (args.Length > 0 && args[0] == "--exit") { Signal(ExitEventName); return; }
         if (args.Length > 0 && args[0] == "--menu") { Signal(MenuEventName); return; }
         if (args.Length > 0 && args[0] == "--settings") { Signal(SettingsEventName); return; }
+        // Deskland.exe --next ：让正在运行的实例换下一个主题（桌面右键菜单用）
+        if (args.Length > 0 && args[0] == "--next") { Signal(NextEventName); return; }
         if (args.Length > 0 && args[0] == "--exit-installed") { Environment.ExitCode = InstallProfile.StopInstalled(); return; }
         // Preview never migrates or shares the development edition's settings.                                 // 老名字（Habitat Wallpaper）下的数据目录、开机自启项搬过来
         bool fromAutostart = Array.IndexOf(args, "--autostart") >= 0;
@@ -217,6 +220,31 @@ static class Settings
     public static string Theme = "beach";
     public static string Lang = "auto";                // 界面语言："auto"（跟随系统）或 I18n.Supported 里的一种
     public static Dictionary<string, Dictionary<string, object>> Params = new Dictionary<string, Dictionary<string, object>>();
+    // 自动换主题：每隔 RotateMinutes 分钟，从 RotateThemes 里随机换一个（不重复当前主题）
+    public static bool RotateOn = false;
+    public static int RotateMinutes = 60;
+    public static List<string> RotateThemes = new List<string>();
+    public const int RotateMin = 1, RotateMax = 7 * 24 * 60;
+
+    public static void SetRotate(object on, object minutes, object themes)
+    {
+        if (on is bool) RotateOn = (bool)on;
+        if (minutes != null)
+        {
+            try { RotateMinutes = (int)Math.Max(RotateMin, Math.Min(RotateMax, Math.Round(Convert.ToDouble(minutes)))); } catch { }
+        }
+        var arr = themes as object[];
+        if (arr != null)
+        {
+            RotateThemes = new List<string>();
+            foreach (var x in arr) { var id = x as string; if (id != null && !RotateThemes.Contains(id)) RotateThemes.Add(id); }
+        }
+    }
+
+    public static Dictionary<string, object> RotateObj()
+    {
+        return Json.Obj("on", RotateOn, "minutes", RotateMinutes, "themes", RotateThemes.ToArray());
+    }
 
     public static void Load()
     {
@@ -228,6 +256,13 @@ static class Settings
             object v;
             if (root.TryGetValue("theme", out v) && v is string) Theme = (string)v;
             if (root.TryGetValue("lang", out v) && v is string) Lang = (string)v;
+            if (root.TryGetValue("rotate", out v) && v is Dictionary<string, object>)
+            {
+                var r = (Dictionary<string, object>)v;
+                object on, min, list;
+                r.TryGetValue("on", out on); r.TryGetValue("minutes", out min); r.TryGetValue("themes", out list);
+                SetRotate(on, min, list);
+            }
             if (root.TryGetValue("params", out v) && v is Dictionary<string, object>)
                 foreach (var kv in (Dictionary<string, object>)v)
                 {
@@ -244,7 +279,7 @@ static class Settings
         try
         {
             Directory.CreateDirectory(Log.DataDir);
-            File.WriteAllText(FilePath, Json.Stringify(Json.Obj("version", 1, "theme", Theme, "lang", Lang, "params", Params)), new UTF8Encoding(false));
+            File.WriteAllText(FilePath, Json.Stringify(Json.Obj("version", 1, "theme", Theme, "lang", Lang, "params", Params, "rotate", RotateObj())), new UTF8Encoding(false));
         }
         catch (Exception ex) { Log.Write("保存设置失败：" + ex.Message); }
     }
@@ -318,14 +353,15 @@ class HostContext : ApplicationContext
 
     readonly string pageDir;
     readonly NotifyIcon tray;
-    readonly MenuItem pauseItem, autoStartItem, settingsItem, reloadItem, exitItem;
+    readonly MenuItem pauseItem, autoStartItem, settingsItem, reloadItem, exitItem, nextItem;
     readonly System.Windows.Forms.Timer watch;
-    readonly EventWaitHandle exitEvent, menuEvent, settingsEvent;
+    readonly EventWaitHandle exitEvent, menuEvent, settingsEvent, nextEvent;
     readonly HotkeyWindow hotkey = new HotkeyWindow();
     readonly Queue<DateTime> restarts = new Queue<DateTime>();
     WallpaperForm form, dead;
     SettingsForm settingsWin;
-    DateTime nextStart = DateTime.MaxValue, saveDue = DateTime.MaxValue;
+    DateTime nextStart = DateTime.MaxValue, saveDue = DateTime.MaxValue, nextRotate = DateTime.MaxValue;
+    readonly Random rotateRnd = new Random();
     bool manualPause, exiting;
     string autoStartSw;                                 // 开机自启没跑起来（只在手动打开时检查）：正在运行的安全软件名（没认出来是 ""）；没问题是 null
     string updateVersion, updateUrl, updateStatus = "", updateError = "";
@@ -341,6 +377,7 @@ class HostContext : ApplicationContext
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ExitEventName);
         menuEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Program.MenuEventName);
         settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Program.SettingsEventName);
+        nextEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Program.NextEventName);
 
         // 快捷键 Ctrl+Alt+H：在鼠标位置弹出菜单
         bool hotkeyOk = hotkey.Register(Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, Keys.H);
@@ -378,6 +415,7 @@ class HostContext : ApplicationContext
         tray.Text = "Deskland Preview";
         tray.ContextMenu = new ContextMenu(new[] {
             settingsItem,
+            nextItem = new MenuItem(I18n.T("trayNext"), delegate { RotateNow(true); }),
             pauseItem,
             reloadItem = new MenuItem(I18n.T("trayReload"), delegate { if (form != null) form.Reload(); }),
             autoStartItem,
@@ -393,6 +431,8 @@ class HostContext : ApplicationContext
         watch.Interval = 500;
         watch.Tick += delegate { Watch(); };
         watch.Start();
+        ScheduleRotate();
+        DesktopMenu.Register();
         StartForm();
         if (showSettings) OpenSettings();                // 用户双击程序启动：直接打开设置
     }
@@ -403,6 +443,8 @@ class HostContext : ApplicationContext
         settingsItem.Text = I18n.T("traySettings");
         pauseItem.Text = I18n.T("trayPause");
         reloadItem.Text = I18n.T("trayReload");
+        nextItem.Text = I18n.T("trayNext");
+        DesktopMenu.Register();
         autoStartItem.Text = I18n.T("trayAutostart");
         exitItem.Text = I18n.T("trayExit");
     }
@@ -477,7 +519,7 @@ class HostContext : ApplicationContext
                 settingsWin.Post(Json.Stringify(Json.Obj("t", "init", "theme", Settings.Theme, "params", Settings.Params,
                     "screen", Json.Obj("w", scr.Width, "h", scr.Height), "autostart", IsAutoStart(),
                     "autostartWarn", autoStartSw != null, "autostartSw", autoStartSw ?? "",
-                    "lang", Settings.Lang, "langEff", I18n.Code, "langSys", I18n.Sys)));
+                    "lang", Settings.Lang, "langEff", I18n.Code, "langSys", I18n.Sys, "rotate", RotateState())));
                 if (updateVersion != null) PostUpdateState();
                 if (form != null && form.LastIcons != "") settingsWin.Post(form.LastIcons);
                 break;
@@ -510,12 +552,19 @@ class HostContext : ApplicationContext
                     Log.Write("拒绝未授权或未知主题切换：" + (id ?? "null"));
                     return;
                 }
-                string page = Themes.PageFor(pageDir, id);
-                if (page == null || id == Settings.Theme) return;
-                Settings.Theme = id;
+                if (SwitchTheme(id)) ScheduleRotate();          // 手动选了主题：自动换主题重新计时
+                break;
+            }
+            case "rotate":
+            {
+                object on, min, list;
+                m.TryGetValue("on", out on); m.TryGetValue("minutes", out min); m.TryGetValue("themes", out list);
+                bool wasOn = Settings.RotateOn; int wasMin = Settings.RotateMinutes;
+                Settings.SetRotate(on, min, list);
+                if (Settings.RotateOn != wasOn || Settings.RotateMinutes != wasMin) ScheduleRotate();
                 SaveSoon();
-                if (form != null) form.LoadPage(page);
-                Log.Write("切换主题：" + id);
+                settingsWin.Post(Json.Stringify(Json.Obj("t", "rotate", "v", RotateState())));
+                Log.Write("自动换主题：" + (Settings.RotateOn ? "开，每 " + Settings.RotateMinutes + " 分钟，" + string.Join(",", Settings.RotateThemes.ToArray()) : "关"));
                 break;
             }
             case "autostartWarnSeen":
@@ -814,8 +863,59 @@ class HostContext : ApplicationContext
         if (exitEvent.WaitOne(0)) { Exit(); return; }
         if (menuEvent.WaitOne(0)) ShowMenu();
         if (settingsEvent.WaitOne(0)) OpenSettings();
+        if (nextEvent.WaitOne(0)) RotateNow(true);
         if (DateTime.Now >= saveDue) { saveDue = DateTime.MaxValue; Settings.Save(); }
         if (form == null && !exiting && DateTime.Now >= nextStart) StartForm();
+        if (DateTime.Now >= nextRotate) RotateNow();
+    }
+
+    // ---------------------------------------------------------------- 切换主题 / 自动换主题
+    bool SwitchTheme(string id)
+    {
+        string page = Themes.PageFor(pageDir, id);
+        if (page == null || id == Settings.Theme) return false;
+        Settings.Theme = id;
+        SaveSoon();
+        if (form != null) form.LoadPage(page);
+        Log.Write("切换主题：" + id);
+        return true;
+    }
+
+    List<string> Candidates(IEnumerable<string> ids)
+    {
+        var pool = new List<string>();
+        foreach (var id in ids)
+            if (id != Settings.Theme && !pool.Contains(id) && ThemeAllowed(id) && Themes.PageFor(pageDir, id) != null) pool.Add(id);
+        return pool;
+    }
+
+    void ScheduleRotate()
+    {
+        nextRotate = Settings.RotateOn ? DateTime.Now.AddMinutes(Settings.RotateMinutes) : DateTime.MaxValue;
+    }
+
+    Dictionary<string, object> RotateState()
+    {
+        var d = Settings.RotateObj();
+        d["next"] = nextRotate == DateTime.MaxValue ? -1 : Math.Max(0, (long)(nextRotate - DateTime.Now).TotalMilliseconds);
+        return d;
+    }
+
+    // manual：托盘 / 桌面右键“下一个主题”。从勾选的主题里随机挑；勾选的不够时，手动的就从全部可用主题里挑
+    void RotateNow(bool manual = false)
+    {
+        ScheduleRotate();
+        var pool = Candidates(Settings.RotateThemes);
+        if (pool.Count == 0 && manual) pool = Candidates(Themes.ReadyIds(pageDir));
+        if (pool.Count == 0) return;                    // 勾选的主题不到两个：保持当前主题
+        string pick = pool[rotateRnd.Next(pool.Count)];
+        if (!SwitchTheme(pick)) return;
+        Log.Write((manual ? "下一个主题 → " : "自动换主题 → ") + pick);
+        if (settingsWin != null)
+        {
+            settingsWin.Post(Json.Stringify(Json.Obj("t", "themeChanged", "id", pick)));
+            settingsWin.Post(Json.Stringify(Json.Obj("t", "rotate", "v", RotateState())));
+        }
     }
 
     void Exit()
@@ -828,8 +928,40 @@ class HostContext : ApplicationContext
         hotkey.Dispose();
         tray.Visible = false;
         if (form != null) form.Shutdown();
+        DesktopMenu.Unregister();
         Log.Write("退出");
         ExitThread();
+    }
+}
+
+// 桌面空白处右键菜单里的“下一个 Deskland 主题”（像 Windows 的“下一个桌面背景”）。
+// 只写当前用户的 HKCU\Software\Classes\DesktopBackground；程序运行时登记（顺便更新文字和路径），正常退出时删掉。
+// Windows 11 上它在“显示更多选项”里。
+static class DesktopMenu
+{
+    const string Key = @"Software\Classes\DesktopBackground\Shell\DesklandPreviewNext";
+
+    public static void Register()
+    {
+        try
+        {
+            string exe = Application.ExecutablePath;
+            using (RegistryKey k = Registry.CurrentUser.CreateSubKey(Key))
+            {
+                k.SetValue("MUIVerb", I18n.T("ctxNext"));
+                k.SetValue("Icon", "\"" + exe + "\"");
+                k.SetValue("Position", "Bottom");
+            }
+            using (RegistryKey c = Registry.CurrentUser.CreateSubKey(Key + @"\command"))
+                c.SetValue("", "\"" + exe + "\" --next");
+        }
+        catch (Exception ex) { Log.Write("登记桌面右键菜单失败：" + ex.Message); }
+    }
+
+    public static void Unregister()
+    {
+        try { Registry.CurrentUser.DeleteSubKeyTree(Key, false); }
+        catch (Exception ex) { Log.Write("删除桌面右键菜单失败：" + ex.Message); }
     }
 }
 

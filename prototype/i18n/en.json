@@ -106,7 +106,19 @@
     "purchaseTheme": "“{name}” is included in the Wallpaper edition.",
     "purchaseMessage": "The preview includes Beach and Meadow forever. Get the Wallpaper edition to unlock more themes in the same Deskland app.",
     "purchaseLater": "Keep exploring",
-    "purchaseWebsite": "Visit website"
+    "purchaseWebsite": "Visit website",
+    "rotate": "Auto-switch themes",
+    "rotateTitle": "Switch to a random ticked theme on a timer",
+    "rotateEvery": "every",
+    "unitMin": "minutes",
+    "unitHour": "hours",
+    "rotatePick": "Include in auto-switch and Next theme",
+    "rotatePickMore": "Tick at least two themes below",
+    "rotateNext": "{n} themes · next switch in {time}",
+    "durSoon": "under a minute",
+    "durMin": "{m} min",
+    "durHour": "{h} h",
+    "durHourMin": "{h} h {m} min"
   },
   "host": {
     "traySettings": "Settings…",
@@ -130,7 +142,9 @@
     "errSettings": "Couldn't open the settings window: {msg}",
     "errNoPage": "Page not found: {path}",
     "errNoDesktop": "Couldn't find the desktop window, so the wallpaper can't be attached.",
-    "errStart": "Couldn't start: {msg}"
+    "errStart": "Couldn't start: {msg}",
+    "trayNext": "Next theme",
+    "ctxNext": "Next Deskland theme"
   },
   "themes": {
     "lotus": {

@@ -26,6 +26,25 @@ static class Themes
         return null;
     }
 
+    // 所有 ready 主题的 id（按清单顺序）
+    public static List<string> ReadyIds(string pageDir)
+    {
+        var ids = new List<string>();
+        try
+        {
+            var root = Json.Parse(File.ReadAllText(Path.Combine(pageDir, "themes.json"), Encoding.UTF8)) as Dictionary<string, object>;
+            if (root != null)
+                foreach (object o in (System.Collections.IEnumerable)root["themes"])
+                {
+                    var theme = o as Dictionary<string, object>;
+                    if (theme != null && theme.ContainsKey("status") && (theme["status"] as string) == "ready" && theme["id"] is string)
+                        ids.Add((string)theme["id"]);
+                }
+        }
+        catch (Exception ex) { Log.Write("读取 themes.json 失败：" + ex.Message); }
+        return ids;
+    }
+
     public static string PageFor(string pageDir, string id)
     {
         var theme = Find(pageDir, id);
