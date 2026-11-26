@@ -1,0 +1,55 @@
+// Deskland Mac host: a native macOS host for Deskland's theme pages.
+// Copyright (C) 2026 Jeremy Day. Part of the Mac host for Deskland (BLEZZ0102/Deskland).
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version. See LICENSE at the top of the repository.
+
+import Cocoa
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+let app = NSApplication.shared
+// Kept here: NSApplication holds its delegate weakly.
+let delegate: NSApplicationDelegate
+var signalSources: [DispatchSourceSignal] = []
+
+func usage() -> Never {
+  FileHandle.standardError.write(Data("""
+    usage: Deskland                        the wallpaper, with a menu bar item
+    developer self-tests (offscreen, nothing shown; see macos/README.md):
+           Deskland --selftest <meadow|beach> <out.png> [--no-icons]
+           Deskland --selftest-shim
+
+    """.utf8))
+  exit(2)
+}
+
+switch arguments.first {
+case "--selftest":
+  guard arguments.count >= 3, let theme = Theme(rawValue: arguments[1]) else { usage() }
+  let output = URL(fileURLWithPath: arguments[2])
+  delegate = SceneTest(theme: theme, output: output, withIcons: !arguments.contains("--no-icons"))
+  app.setActivationPolicy(.accessory)
+case "--selftest-shim":
+  delegate = ShimTest()
+  app.setActivationPolicy(.accessory)
+case nil:
+  // A second launch while the wallpaper runs leaves quietly. (The self-tests do not take the lock.)
+  guard App.claimInstance() else {
+    Log.line("already running; this copy exits")
+    exit(0)
+  }
+  // `kill` / Ctrl-C quit like the menu does, so the window is taken away the same way.
+  for sig in [SIGTERM, SIGINT] {
+    signal(sig, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+    source.setEventHandler { NSApp.terminate(nil) }
+    source.resume()
+    signalSources.append(source)
+  }
+  delegate = Controller()
+  app.setActivationPolicy(.accessory)
+default:
+  usage()
+}
+app.delegate = delegate
+app.run()

@@ -1,0 +1,220 @@
+# Deskland Preview for macOS (host)
+
+**English** · [简体中文](#中文说明)
+
+A small native macOS host that runs Deskland's two open-source themes, Meadow (`prototype/meadow.html`)
+and Beach (`prototype/flat.html`), as a live desktop wallpaper that forms around the real desktop
+icons. The theme pages run unchanged. This folder is the Mac counterpart of `host/` (the Windows
+host) and is licensed under the same GPL-3.0 as the rest of the repository (see `LICENSE`, `NOTICE`,
+`THIRD_PARTY_NOTICES.md` and `TRADEMARKS.md` at the top level).
+
+Parts of the window, web view and Accessibility code are adapted from Desk Critters, also by Jeremy
+Day, and are released here under GPL-3.0.
+
+## Build
+
+```sh
+tools/make-mac.sh            # writes ".capture/dist/Deskland Preview.app" and prints its path
+tools/make-mac.sh <dir>      # or "<dir>/Deskland Preview.app"
+```
+
+It needs the Xcode command line tools (`swiftc`) and nothing else. It builds a universal binary
+(Apple silicon and Intel, macOS 13 or later), copies `prototype/` into
+`Contents/Resources/prototype`, takes the version from `tools/version.json`, and signs the app ad hoc.
+
+## Run
+
+Quit any other live wallpaper first, then open `Deskland Preview.app`. A leaf appears in the menu
+bar (no Dock icon). The menu has: Themes (Meadow / Beach, remembered), Pause animation, Reload,
+Grant Accessibility… (only until it is granted), About, and Exit (restore wallpaper). The menu is in
+Simplified Chinese when the Mac's preferred language is Chinese, otherwise English.
+
+- Only one copy runs at a time; opening it again does nothing.
+- Exit (or a log out, or `kill`) removes the wallpaper window, so the normal desktop picture is
+  back at once.
+- Its own identity, apart from other Deskland builds: bundle id `app.deskland.preview.mac`;
+  settings in that UserDefaults domain, the instance lock in
+  `~/Library/Application Support/app.deskland.preview.mac/`.
+- It pauses while one window covers essentially the whole main screen (85% or more: zoomed or full
+  screen), while the display sleeps, the screen is locked or the screen saver runs, or when
+  Pause is checked.
+- Frame rate: the pages cap themselves at 30 fps (`cap30`, on by default). The host adds no timer
+  or display link that drives frames; WebKit runs the page's `requestAnimationFrame` as usual.
+
+## Accessibility permission
+
+Finder only tells another app where the desktop icons are through Accessibility. Choose Grant
+Accessibility… in the menu, or turn on **Deskland Preview** in System Settings > Privacy & Security
+> Accessibility. The scene forms around the icons within about 2 s, without a relaunch. Because the
+app is signed ad hoc, a rebuilt copy may need the switch turned off and on again.
+
+Without the permission the host sends an empty icon list, so the page still shows its scene (open sea
+on the Beach, drifting clouds on the Meadow), and it checks every 2 s whether access has been granted.
+
+### What is read, and what never is
+
+- Read: the **position and size** of each desktop icon (Finder's desktop, main screen only), and the
+  position and size of on-screen windows (to decide when to pause).
+- Never read: icon names, file names, paths, window titles or contents, or any other attribute. No
+  action is ever performed on an icon. No network, no screenshots, nothing written except the
+  chosen theme, the instance lock and short status lines in the system log (`deskland: …`).
+
+## How it talks to the pages
+
+The pages were written for WebView2 on Windows. Loaded with `?wallpaper=1`, they look for
+`window.chrome.webview`, add a `message` listener and post `'ready'`. A `WKUserScript` injected at
+document start defines that object: `postMessage` goes to a `WKScriptMessageHandler`, and the host
+delivers messages by calling `window.__desklandDeliver(text)`, which hands each listener
+`{ data: "<json string>" }`, as WebView2 does.
+
+After `ready` the host sends, in the same order as the Windows host:
+
+1. `{"t":"settings","v":{…}}`: the theme's defaults from `themes.json`.
+2. `{"t":"icons","vis":true,"r":[[left,top,right,bottom],…]}`: icon rects in physical pixels from
+   the top left of the main screen (points × `backingScaleFactor`). Sent again only when they change
+   (polled every 0.4 s, every 0.1 s for 2 s after a change).
+3. `{"t":"pause","v":true|false}`.
+
+## Why a custom URL scheme, not file URLs
+
+The pages are served from the bundle over a private scheme, `deskland://app/<page>`
+(`SceneHandler` in `Scene.swift`), because file URLs break the Beach:
+
+- WebKit gives every `file://` document an opaque origin, so images from `assets/` are cross-origin
+  and taint the canvas. `beach-palms.js` reads that canvas back with `getImageData`, which throws: the
+  Beach drew **no palm trees** and threw an error on every frame.
+- Those errors arrive as a bare `Script error.` with no file or line, which makes the pages hard
+  to debug.
+
+Under `deskland://app/` everything is one origin: sprites and the palm atlas load, WebGL2 works,
+`themes.json` is readable, and errors keep their file and line. The handler serves only files inside
+`Contents/Resources/prototype`.
+
+## Files
+
+| File | What it does |
+| --- | --- |
+| `main.swift` | Starts the wallpaper (one instance) or a developer self-test |
+| `App.swift` | The wallpaper window, the menu bar item, pausing, quitting |
+| `Strings.swift` | Menu text in Simplified Chinese or English (from `prototype/i18n/*.json` where it exists) |
+| `Shim.swift` | The injected `window.chrome.webview` shim and its message handler |
+| `Scene.swift` | Themes (pages, names, defaults from `themes.json`), the `deskland://` scheme handler, the web view |
+| `Icons.swift` | Reads the desktop icon frames from Finder through Accessibility |
+| `SelfTest.swift` | Developer self-tests |
+| `Info.plist` | Bundle id `app.deskland.preview.mac`, menu bar only (`LSUIElement`) |
+
+## Developer self-tests
+
+For developers only: there is no menu item for them. They draw in a window placed off every screen,
+show nothing, take no lock and do not need Accessibility, so they can run next to a running copy.
+
+```sh
+A=".capture/dist/Deskland Preview.app/Contents/MacOS/Deskland"
+"$A" --selftest meadow out.png             # 9 fake icons; exit 0, or 1 on any JavaScript error
+"$A" --selftest beach out.png --no-icons   # with an empty icon list
+"$A" --selftest-shim                       # message flow: 'ready' first, every message in order
+```
+
+The scene test uses a 1728 × 1117 point web view at scale 2. It sends the settings, the icons and
+`pause:false` once the page says `ready`, waits about 6.5 s, logs the page state (canvas size,
+WebGL2, `cap30`, measured fps) and writes a snapshot PNG. A watchdog exits 1 if anything stalls.
+
+## Known gaps
+
+- Main screen only, as on Windows: other displays keep their normal wallpaper.
+- The settings page (`settings.html`) is not hosted yet: each theme runs with its defaults.
+- Share (snapshot / recording) messages from the page are only logged.
+- No start-at-login option yet.
+- Unsigned (ad hoc): Gatekeeper asks on first open of a downloaded copy, and the Accessibility switch
+  may need resetting after a rebuild.
+- The pause rule looks at one window at a time; several windows that together cover the screen do
+  not pause it (as on Windows).
+
+---
+
+## 中文说明
+
+[English](#deskland-preview-for-macos-host) · **简体中文**
+
+一个原生 macOS 小宿主，把 Deskland 的两个开源主题——草地（`prototype/meadow.html`）和沙滩
+（`prototype/flat.html`）——作为动态桌面壁纸运行，场景会围绕真实的桌面图标生成。主题页面不做任何修改。
+本目录相当于 Windows 宿主 `host/` 的 Mac 版，与仓库其他部分同样按 GPL-3.0 发布（见顶层 `LICENSE`、
+`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `TRADEMARKS.md`）。
+
+窗口、网页视图和辅助功能相关的部分代码改编自 Jeremy Day 的 Desk Critters，在此按 GPL-3.0 发布。
+
+### 构建
+
+```sh
+tools/make-mac.sh            # 生成 ".capture/dist/Deskland Preview.app" 并输出路径
+tools/make-mac.sh <目录>      # 或生成 "<目录>/Deskland Preview.app"
+```
+
+只需要 Xcode 命令行工具（`swiftc`）。生成通用二进制（Apple 芯片与 Intel，macOS 13 及以上），把
+`prototype/` 复制到 `Contents/Resources/prototype`，版本号取自 `tools/version.json`，并做临时（ad hoc）签名。
+
+### 运行
+
+先退出其他动态壁纸，再打开 `Deskland Preview.app`。菜单栏出现一片叶子（不显示在程序坞）。菜单包括：
+主题（草地 / 沙滩，会记住）、暂停动画、重新载入、授予辅助功能权限…（仅在未授权时显示）、关于，以及
+退出（恢复原壁纸）。系统首选语言为中文时菜单显示简体中文，否则显示英文。
+
+- 同时只运行一份，再次打开不会启动第二份。
+- 退出（或注销、`kill`）时会移除壁纸窗口，立即恢复原来的桌面图片。
+- 与其他 Deskland 版本身份独立：bundle id 为 `app.deskland.preview.mac`，设置保存在同名 UserDefaults
+  域，单实例锁位于 `~/Library/Application Support/app.deskland.preview.mac/`。
+- 当某个窗口几乎占满主屏幕（85% 以上，如缩放或全屏）、显示器睡眠、锁屏、屏幕保护程序运行，或勾选
+  “暂停动画”时自动暂停。
+- 帧率：页面自身限帧 30fps（`cap30`，默认开启）。宿主不额外加定时器或 display link 驱动画面，
+  页面的 `requestAnimationFrame` 由 WebKit 照常调度。
+
+### 辅助功能权限
+
+Finder 只通过辅助功能告诉其他程序桌面图标的位置。在菜单中选择“授予辅助功能权限…”，或在 系统设置 >
+隐私与安全性 > 辅助功能 中打开 **Deskland Preview**。约 2 秒内场景就会围绕图标生成，无需重启。由于
+是临时签名，重新构建后可能需要把开关关掉再打开。
+
+未授权时宿主发送空的图标列表，页面仍显示场景（沙滩为开阔海面，草地为漂浮的云），并每 2 秒检查一次是否已授权。
+
+#### 读取什么，绝不读取什么
+
+- 读取：每个桌面图标的**位置和大小**（Finder 桌面，仅主屏幕），以及屏幕上窗口的位置和大小（用于判断何时暂停）。
+- 绝不读取：图标名称、文件名、路径、窗口标题或内容等任何其他属性。不会对图标执行任何操作。不联网、
+  不截屏，除所选主题、单实例锁和系统日志中的简短状态行（`deskland: …`）外不写入任何内容。
+
+### 与页面的通信
+
+页面原为 Windows 上的 WebView2 编写。以 `?wallpaper=1` 加载时，页面查找 `window.chrome.webview`、
+添加 `message` 监听并发送 `'ready'`。宿主在文档开始时注入一个 `WKUserScript` 提供这个对象：
+`postMessage` 交给 `WKScriptMessageHandler`；宿主调用 `window.__desklandDeliver(text)` 发送消息，
+每个监听器收到 `{ data: "<json 字符串>" }`，与 WebView2 一致。收到 `ready` 后按 Windows 宿主的顺序发送
+`settings`（`themes.json` 中的默认值）、`icons`（主屏幕左上角起算的物理像素矩形，仅在变化时重发）和 `pause`。
+
+### 为什么用自定义 URL scheme 而不是 file URL
+
+页面通过私有 scheme `deskland://app/<页面>` 从程序包内提供，因为 file URL 会让沙滩出错：WebKit 给每个
+`file://` 文档不透明的源，`assets/` 中的图片因此跨源并污染画布，`beach-palms.js` 用 `getImageData`
+读回画布时抛出异常，沙滩**一棵椰子树都画不出**，且每帧报错；错误只显示为没有文件和行号的
+`Script error.`，难以调试。在 `deskland://app/` 下所有资源同源，贴图和椰树图集正常加载，WebGL2 可用，
+错误保留文件和行号。处理器只提供 `Contents/Resources/prototype` 内的文件。
+
+### 开发者自测
+
+仅供开发者使用，菜单中没有入口。自测在屏幕之外的窗口中绘制，不显示任何内容、不占用单实例锁、
+不需要辅助功能权限，可与正在运行的壁纸同时进行。
+
+```sh
+A=".capture/dist/Deskland Preview.app/Contents/MacOS/Deskland"
+"$A" --selftest meadow out.png             # 9 个模拟图标；成功退出码 0，有任何 JavaScript 错误则为 1
+"$A" --selftest beach out.png --no-icons   # 空图标列表
+"$A" --selftest-shim                       # 消息流：先收到 'ready'，所有消息按顺序送达
+```
+
+### 已知不足
+
+- 与 Windows 版相同，仅支持主屏幕，其他显示器保持原壁纸。
+- 尚未承载设置页（`settings.html`），每个主题使用默认参数。
+- 页面发出的分享（图片 / 录制）消息只记录日志。
+- 暂无登录时自动启动选项。
+- 未正式签名（ad hoc）：下载的副本首次打开时 Gatekeeper 会提示，重新构建后可能需要重置辅助功能开关。
+- 暂停规则逐个窗口判断，多个窗口合起来覆盖屏幕时不会暂停（与 Windows 版相同）。
