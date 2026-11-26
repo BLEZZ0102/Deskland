@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$NsisCompiler,
     [string]$WebView2Bootstrapper,
     [switch]$SkipBuild
@@ -35,21 +35,25 @@ $NsisCompiler = [IO.Path]::GetFullPath($NsisCompiler)
 $WebView2Bootstrapper = [IO.Path]::GetFullPath($WebView2Bootstrapper)
 
 # A fixed source list prevents other editions or private working files entering this package.
-$sources = @('.gitattributes', '.gitignore', 'AGENTS.md', 'LICENSE', 'NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md',
-    'host\DesktopHost.cs', 'host\DesklandPreview.ico', 'host\README.md', 'host\app.manifest', 'host\build.ps1', 'host\inspect.ps1',
+# Private development notes stay out of the public source ZIP.
+$sources = @('.gitattributes', '.gitignore', 'NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md',
+    'docs\images\beach.webp', 'docs\images\meadow.webp',
+    'host\DesktopHost.cs', 'host\Themes.cs','host\DesklandPreview.ico', 'host\README.md', 'host\app.manifest', 'host\build.ps1', 'host\inspect.ps1',
     'tools\build-installer.ps1', 'tools\installer.nsi', 'tools\version.json')
 $themeFiles = @('flat.html', 'meadow.html', 'settings.html', 'thumbs-data.js', 'share.js', 'serve.mjs', 'themes.json', 'beach-palms.js', 'meadow-boy.js', 'meadow-cat.js',
-    'i18n\en.json', 'i18n\zh-CN.json', 'thumbs\beach.webp', 'thumbs\meadow.webp',
+    'scene-core.js', 'saltflats.html', 'saltflats-scene.js', 'cells.html', 'cells-scene.js',
+    'i18n\en.json','thumbs\beach.webp', 'thumbs\meadow.webp', 'thumbs\saltflats.webp', 'thumbs\cells.webp',
     'assets\beach-coconut-palm-v2.png', 'assets\beach-coconut-palm-curved.png', 'assets\beach-coconut-palm-airy.png', 'assets\beach-coconut-palm-windswept.png', 'assets\beach-coconut-palm-arch.png',
     'assets\meadow-black-kitten.png', 'assets\meadow-kite-boy-level-face.png', 'assets\meadow-kite-boy-diagonal-run.png')
-$themes = (Get-Content -LiteralPath (Join-Path $root 'prototype\themes.json') -Raw -Encoding UTF8 | ConvertFrom-Json).themes
-$ready = @($themes | Where-Object { $_.status -eq 'ready' })
-$locked = @($themes | Where-Object { $_.locked -eq $true })
-if ($themes.Count -ne 13 -or $ready.Count -ne 2 -or $locked.Count -ne 11 -or (($ready.id | Sort-Object) -join ',' -ne 'beach,meadow')) {
-    throw 'Expected two usable themes and eleven locked preview cards'
+# Salt Flats scene textures and their credits: every file under prototype\assets\saltflats
+$saltAssets = Join-Path $root 'prototype\assets\saltflats'
+if (Test-Path -LiteralPath $saltAssets) {
+    $themeFiles += @(Get-ChildItem -LiteralPath $saltAssets -Recurse -File | ForEach-Object { $_.FullName.Substring((Join-Path $root 'prototype').Length + 1) })
 }
-foreach ($theme in $locked) {
-    if ($theme.page -or $theme.groups) { throw 'Locked themes must not contain page source or settings' }
+$themes = (Get-Content -LiteralPath (Join-Path $root 'prototype\themes.json') -Raw -Encoding UTF8 | ConvertFrom-Json).themes
+foreach ($theme in $themes) {
+    if ($theme.status -ne 'ready' -or -not $theme.page) { throw 'Every theme needs status "ready" and a page: ' + $theme.id }
+    if ($themeFiles -notcontains $theme.page) { throw 'Theme page missing from $themeFiles: ' + $theme.page }
 }
 foreach ($theme in $themes) {
     $match = [regex]::Match([string]$theme.thumb, 'url\(thumbs/([^\)?]+)')
@@ -70,7 +74,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($sourceStage, (Join-Path $payload 'Deskland-source.zip'))
 # Only program data is installed. The accompanying ZIP contains the exact corresponding source.
 $runtimeFiles = @('host\bin\Deskland.exe', 'host\bin\DesklandPreview.ico', 'host\bin\Microsoft.Web.WebView2.Core.dll', 'host\bin\Microsoft.Web.WebView2.WinForms.dll', 'host\bin\WebView2Loader.dll')
-$installFiles = @('LICENSE', 'NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md') + @($themeFiles | Where-Object { $_ -ne 'serve.mjs' } | ForEach-Object { 'prototype\' + $_ }) + $runtimeFiles
+$installFiles = @('NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md') + @($themeFiles | Where-Object { $_ -ne 'serve.mjs' } | ForEach-Object { 'prototype\' + $_ }) + $runtimeFiles
 foreach ($file in $installFiles) {
     $target = Join-Path $payload $file
     New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
