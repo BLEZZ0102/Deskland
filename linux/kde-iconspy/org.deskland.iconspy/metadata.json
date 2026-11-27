@@ -1,0 +1,12 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Id": "org.deskland.iconspy",
+        "Name": "Deskland IconSpy",
+        "Description": "Reads desktop folder-view icon geometry for the Deskland wallpaper",
+        "Icon": "preferences-desktop-icons-size",
+        "Category": "System Information",
+        "License": "GPL-3.0-only"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

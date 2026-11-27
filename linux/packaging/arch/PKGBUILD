@@ -1,0 +1,50 @@
+# Maintainer: Deskland Linux port contributors
+pkgname=deskland-preview
+pkgver=0.1.3
+pkgrel=1
+pkgdesc="Adaptive wallpaper that follows desktop icons"
+arch=('any')
+url="https://deskland.app/"
+license=('GPL-3.0-only')
+depends=(
+  'python'
+  'python-gobject'
+  'python-cairo'
+  'gtk3'
+  'webkit2gtk-4.1'
+  'libayatana-appindicator'
+  'xdg-utils'
+)
+optdepends=(
+  'gtk-layer-shell: Wayland layer-shell wallpaper backend'
+  'xdotool: automatic pause on X11'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/BLEZZ0102/Deskland/archive/refs/heads/main.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  local src="$srcdir/Deskland-main"
+
+  install -d "$pkgdir/usr/lib/deskland/linux/deskland_linux" \
+             "$pkgdir/usr/lib/deskland/prototype" \
+             "$pkgdir/usr/bin" \
+             "$pkgdir/usr/share/applications" \
+             "$pkgdir/usr/share/icons/hicolor/scalable/apps" \
+             "$pkgdir/usr/share/licenses/$pkgname"
+
+  cp -a "$src/linux/deskland_linux/." "$pkgdir/usr/lib/deskland/linux/deskland_linux/"
+  cp -a "$src/prototype/." "$pkgdir/usr/lib/deskland/prototype/"
+  install -m644 "$src/linux/packaging/deskland.desktop" \
+    "$pkgdir/usr/share/applications/deskland.desktop"
+  install -m644 "$src/linux/packaging/deskland.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/deskland.svg"
+  install -m644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  cat > "$pkgdir/usr/bin/deskland-linux" <<'EOF'
+#!/bin/sh
+export PYTHONPATH="/usr/lib/deskland/linux${PYTHONPATH:+:$PYTHONPATH}"
+export DESKLAND_PROTOTYPE="${DESKLAND_PROTOTYPE:-/usr/lib/deskland/prototype}"
+exec python3 -m deskland_linux "$@"
+EOF
+  chmod 755 "$pkgdir/usr/bin/deskland-linux"
+}
