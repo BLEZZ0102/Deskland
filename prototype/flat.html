@@ -439,7 +439,8 @@ void main() {
   // 喷绘颗粒：约 1.3px 的随机点（静止，像印刷纸面上的颗粒）
   vec2 gp = floor(p * (0.78 * max(uScale, 1.0)));   // 按屏幕的实际像素取颗粒（高分屏上不会变成一块块的小方块）
   // 用 hash2：旧 hash 对整数坐标每几十像素循环一次，最亮的颗粒会排成一格格的点阵
-  float g1 = hash2(gp + 0.5), g2 = hash2(gp + 7.3);
+  // 不能取到 0：step(0.0, 0.0) = 1，没有水雾的海面上会留下固定不动的白点
+  float g1 = max(hash2(gp + 0.5), 1e-4), g2 = max(hash2(gp + 7.3), 1e-4);
   float gAmt = uGrain;
 
   float s0 = mix(fieldS(uFA, p), fieldS(uFB, p), uMix);
