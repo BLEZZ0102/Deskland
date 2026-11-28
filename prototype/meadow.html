@@ -566,6 +566,7 @@ function commit(fromEmpty = false) {
   const nf = computeField(P.adaptive ? iconRects() : []);
   const target = 1 - toI;
   if (fromEmpty) { FA = computeField([]); uploadField(toI, FA); }
+  else if (curMix < 1) { FA = { s: FA.s.map((v, i) => v + (FB.s[i] - v) * curMix) }; uploadField(toI, FA); }   // 上一次还没变完：从当前的样子接着变（从上一次的终点开始会跳一下）
   else FA = FB;
   FB = nf;
   uploadField(target, FB);
